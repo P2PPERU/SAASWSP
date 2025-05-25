@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -47,13 +49,9 @@ services:
       - DATABASE_NAME=whatsapp_saas
       - DATABASE_CONNECTION_CLIENT_NAME=evolution_api
       - DATABASE_CONNECTION_SSL=false
-      # --- REDIS CONFIGURACIÓN COMPLETA ABAJO ---
       - REDIS_ENABLED=true
-      - REDIS_URI=//redis:6379
-      - REDIS_HOST=redis
+      - REDIS_HOST=whatsapp_saas_redis
       - REDIS_PORT=6379
-      - REDIS_PREFIX_KEY=evolution
-      # ------------------------------------------
       - RABBITMQ_ENABLED=false
       - WEBSOCKET_ENABLED=false
     volumes:
@@ -74,4 +72,3 @@ volumes:
 networks:
   whatsapp_network:
     driver: bridge
-
