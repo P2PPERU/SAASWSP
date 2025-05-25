@@ -49,8 +49,8 @@ services:
       - DATABASE_CONNECTION_SSL=false
       # --- REDIS CONFIGURACIÓN COMPLETA ABAJO ---
       - REDIS_ENABLED=true
-      - REDIS_URI=redis://whatsapp_saas_redis:6379
-      - REDIS_HOST=whatsapp_saas_redis
+      - REDIS_URI=//redis:6379
+      - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PREFIX_KEY=evolution
       # ------------------------------------------

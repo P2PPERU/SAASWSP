@@ -223,7 +223,86 @@ export class WhatsAppService {
       throw new BadRequestException(`Error al conectar la instancia: ${error.message}`);
     }
   }
+  /**
+   * Obtener estado de conexión en tiempo real
+   */
+  async getConnectionStatus(tenantId: string, instanceId: string) {
+    const instance = await this.getInstance(tenantId, instanceId);
 
+    try {
+      // Obtener estado actual de Evolution API
+      const status = await this.evolutionApiService.getInstanceStatus(instance.data.instanceKey);
+      
+      this.logger.log(`Estado de conexión para ${instance.data.name}: ${JSON.stringify(status)}`);
+      
+      // Determinar el estado real
+      const isConnected = status.instance?.state === 'open';
+      const isConnecting = status.instance?.state === 'connecting';
+      
+      // Actualizar estado en BD si cambió
+      const newStatus = isConnected 
+        ? InstanceStatus.CONNECTED 
+        : isConnecting 
+          ? InstanceStatus.CONNECTING 
+          : InstanceStatus.DISCONNECTED;
+      
+      let qrCode = instance.data.qrCode;
+      
+      // Si está conectado, limpiar QR y actualizar datos del perfil
+      if (isConnected) {
+        qrCode = null;
+        if (status.instance.profileName && instance.data.phoneNumber !== status.instance.profileName) {
+          instance.data.phoneNumber = status.instance.profileName;
+        }
+        if (!instance.data.lastConnectionAt) {
+          instance.data.lastConnectionAt = new Date();
+        }
+      }
+      
+      // Si el estado cambió, actualizar en BD
+      if (instance.data.status !== newStatus || instance.data.qrCode !== qrCode) {
+        instance.data.status = newStatus;
+        instance.data.qrCode = qrCode;
+        await this.instanceRepository.save(instance.data);
+      }
+
+      return {
+        message: 'Estado de conexión obtenido',
+        data: {
+          instanceId: instance.data.id,
+          instanceKey: instance.data.instanceKey,
+          name: instance.data.name,
+          status: newStatus,
+          connected: isConnected,
+          connecting: isConnecting,
+          phoneNumber: instance.data.phoneNumber,
+          profilePictureUrl: status.instance?.profilePictureUrl,
+          lastConnectionAt: instance.data.lastConnectionAt,
+          qrCode: qrCode,
+          evolutionStatus: status,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error obteniendo estado de conexión: ${error.message}`);
+      
+      // Si hay error, devolver el estado de la BD
+      return {
+        message: 'Estado obtenido de caché local',
+        data: {
+          instanceId: instance.data.id,
+          instanceKey: instance.data.instanceKey,
+          name: instance.data.name,
+          status: instance.data.status,
+          connected: instance.data.status === InstanceStatus.CONNECTED,
+          connecting: instance.data.status === InstanceStatus.CONNECTING,
+          phoneNumber: instance.data.phoneNumber,
+          lastConnectionAt: instance.data.lastConnectionAt,
+          qrCode: instance.data.qrCode,
+          error: error.message,
+        },
+      };
+    }
+  }
   /**
    * Desconectar una instancia
    */

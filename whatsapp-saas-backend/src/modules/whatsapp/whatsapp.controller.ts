@@ -9,6 +9,8 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Logger,
+  Req,
 } from '@nestjs/common';
 import { WhatsAppService } from './whatsapp.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,10 +18,13 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateInstanceDto, SendMessageDto, UpdateInstanceDto } from './dto';
 import { User } from '../../database/entities';
 import { Public } from '../auth/decorators/public.decorator';
+import { Request } from 'express';
 
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard)
 export class WhatsAppController {
+  private readonly logger = new Logger(WhatsAppController.name);
+
   constructor(private readonly whatsAppService: WhatsAppService) {}
 
   /**
@@ -61,6 +66,17 @@ export class WhatsAppController {
     @Param('instanceId') instanceId: string,
   ) {
     return this.whatsAppService.connectInstance(user.tenantId, instanceId);
+  }
+
+  /**
+   * Verificar estado de conexión y obtener QR actualizado
+   */
+  @Get('instances/:instanceId/connection-status')
+  async getConnectionStatus(
+    @CurrentUser() user: User,
+    @Param('instanceId') instanceId: string,
+  ) {
+    return this.whatsAppService.getConnectionStatus(user.tenantId, instanceId);
   }
 
   /**
@@ -135,7 +151,13 @@ export class WhatsAppController {
   async handleWebhook(
     @Param('instanceId') instanceId: string,
     @Body() webhookData: any,
+    @Req() request: Request,
   ) {
+    // Log inicial del webhook
+    this.logger.log(`🔔 Webhook recibido para instancia: ${instanceId}`);
+    this.logger.debug(`Headers: ${JSON.stringify(request.headers)}`);
+    this.logger.debug(`Body: ${JSON.stringify(webhookData)}`);
+    
     await this.whatsAppService.processWebhook(instanceId, webhookData);
     return { status: 'ok' };
   }
