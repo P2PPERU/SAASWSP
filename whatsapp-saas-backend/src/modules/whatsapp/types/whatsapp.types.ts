@@ -1,17 +1,21 @@
 // src/modules/whatsapp/types/whatsapp.types.ts
 
-// Estos enums deben coincidir con los definidos en las entidades
+/**
+ * Tipos generales de la aplicación WhatsApp
+ * Estos enums deben coincidir con los definidos en las entidades de la base de datos
+ */
+
 export enum InstanceStatus {
-  DISCONNECTED = 'DISCONNECTED',
-  CONNECTING = 'CONNECTING',
-  CONNECTED = 'CONNECTED',
-  FAILED = 'FAILED',
+  DISCONNECTED = 'disconnected',
+  CONNECTING = 'connecting',
+  CONNECTED = 'connected',
+  FAILED = 'failed',
 }
 
 export enum ConversationStatus {
-  ACTIVE = 'ACTIVE',
-  ARCHIVED = 'ARCHIVED',
-  CLOSED = 'CLOSED',
+  ACTIVE = 'active',
+  ARCHIVED = 'archived',
+  CLOSED = 'closed',
 }
 
 export enum MessageType {
@@ -36,29 +40,29 @@ export enum MessageStatus {
   FAILED = 'failed',
 }
 
-// Interfaces para los webhooks de Evolution API
-export interface EvolutionWebhookData {
-  event: string;
-  instance: string;
-  data: any;
+// Interfaces básicas que se usan en múltiples lugares
+export interface WhatsAppConfig {
+  instanceName: string;
+  webhookUrl?: string;
+  qrCodeTimeout?: number;
+  messageRetries?: number;
 }
 
-export interface ConnectionUpdateData {
-  state: 'open' | 'close' | 'connecting';
+export interface MessageMetadata {
+  messageId?: string;
+  timestamp?: Date;
+  retryCount?: number;
 }
 
-export interface MessageUpsertData {
-  key: {
-    remoteJid: string;
-    fromMe: boolean;
-    id: string;
-  };
-  message: {
-    conversation?: string;
-    extendedTextMessage?: {
-      text: string;
-    };
-    pushName?: string;
-  };
-  messageTimestamp: number;
+// DTOs internos
+export interface SendMessageRequest {
+  to: string;
+  text: string;
+  instanceId: string;
+}
+
+export interface MediaMessageRequest extends SendMessageRequest {
+  mediaUrl: string;
+  caption?: string;
+  mimeType: string;
 }
