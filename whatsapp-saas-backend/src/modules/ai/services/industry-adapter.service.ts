@@ -1,0 +1,1 @@
+// Adaptación por industria

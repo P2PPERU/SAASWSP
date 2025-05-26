@@ -1,0 +1,1 @@
+// Configuración por tenant
