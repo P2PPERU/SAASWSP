@@ -17,7 +17,13 @@ import {
 import { WhatsAppService } from './whatsapp.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { CreateInstanceDto, SendMessageDto, UpdateInstanceDto } from './dto';
+import { 
+  CreateInstanceDto, 
+  SendMessageDto, 
+  UpdateInstanceDto,
+  BulkMessageDto,
+  ScheduleMessageDto 
+} from './dto';
 import { User } from '../../database/entities';
 import { Public } from '../auth/decorators/public.decorator';
 import { Request } from 'express';
@@ -335,5 +341,73 @@ export class WhatsAppController {
     
     await this.whatsAppService.processWebhook(instanceId, formattedData);
     return { status: 'ok' };
+  }
+
+  /**
+   * Obtener estado de la cola de mensajes
+   */
+  @Get('queue/stats')
+  async getQueueStats(@CurrentUser() user: User) {
+    const stats = await this.whatsAppService.getQueueStats();
+    return {
+      message: 'Estadísticas de la cola obtenidas',
+      data: stats,
+    };
+  }
+
+  /**
+   * Obtener límites de rate limit actuales
+   */
+  @Get('rate-limit/usage')
+  async getRateLimitUsage(@CurrentUser() user: User) {
+    const usage = await this.whatsAppService.getRateLimitUsage(user.tenantId);
+    return {
+      message: 'Uso actual de límites',
+      data: usage,
+    };
+  }
+
+  /**
+   * Reintentar mensajes fallidos
+   */
+  @Post('queue/retry-failed')
+  async retryFailedMessages(@CurrentUser() user: User) {
+    const result = await this.whatsAppService.retryFailedMessages(user.tenantId);
+    return {
+      message: 'Mensajes fallidos reintentados',
+      data: result,
+    };
+  }
+
+  /**
+   * Enviar mensajes masivos (con rate limiting automático)
+   */
+  @Post('instances/:instanceId/messages/bulk')
+  async sendBulkMessages(
+    @CurrentUser() user: User,
+    @Param('instanceId') instanceId: string,
+    @Body() bulkMessageDto: BulkMessageDto,
+  ) {
+    return this.whatsAppService.sendBulkMessages(
+      user.tenantId,
+      instanceId,
+      bulkMessageDto,
+    );
+  }
+
+  /**
+   * Programar un mensaje para envío futuro
+   */
+  @Post('instances/:instanceId/messages/schedule')
+  async scheduleMessage(
+    @CurrentUser() user: User,
+    @Param('instanceId') instanceId: string,
+    @Body() scheduleDto: ScheduleMessageDto,
+  ) {
+    return this.whatsAppService.scheduleMessage(
+      user.tenantId,
+      instanceId,
+      scheduleDto,
+    );
   }
 }

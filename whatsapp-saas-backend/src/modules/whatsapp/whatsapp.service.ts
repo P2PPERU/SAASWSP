@@ -2,8 +2,11 @@ import { Injectable, BadRequestException, NotFoundException, Logger } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
-import { WhatsAppInstance, Conversation, Message } from '../../database/entities';
+import { WhatsAppInstance, Conversation, Message, Tenant } from '../../database/entities';
 import { EvolutionApiService } from './services/evolution-api.service';
+import { MessageQueueService } from './services/message-queue.service';
+import { RateLimitService } from './services/rate-limit.service';
+import { TenantService } from '../tenant/tenant.service';
 import { CreateInstanceDto, SendMessageDto, UpdateInstanceDto } from './dto';
 import { v4 as uuidv4 } from 'uuid';
 // Importar tipos desde el index centralizado
@@ -29,7 +32,12 @@ export class WhatsAppService {
     private readonly conversationRepository: Repository<Conversation>,
     @InjectRepository(Message)
     private readonly messageRepository: Repository<Message>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepository: Repository<Tenant>,
     private readonly evolutionApiService: EvolutionApiService,
+    private readonly messageQueueService: MessageQueueService,
+    private readonly rateLimitService: RateLimitService,
+    private readonly tenantService: TenantService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -365,7 +373,7 @@ export class WhatsAppService {
   }
 
   /**
-   * Enviar un mensaje
+   * Enviar un mensaje (con cola y rate limiting)
    */
   async sendMessage(tenantId: string, instanceId: string, sendMessageDto: SendMessageDto) {
     const instance = await this.getInstance(tenantId, instanceId);
@@ -374,11 +382,37 @@ export class WhatsAppService {
       throw new BadRequestException('La instancia no está conectada');
     }
 
+    // 1. Obtener el tenant para verificar el plan
+    const tenant = await this.tenantRepository.findOne({
+      where: { id: tenantId }
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant no encontrado');
+    }
+
+    // 2. Verificar rate limit
+    const rateLimitCheck = await this.rateLimitService.canSendMessage(tenantId, tenant.plan);
+    
+    if (!rateLimitCheck.allowed) {
+      throw new BadRequestException({
+        message: rateLimitCheck.reason,
+        retryAfter: rateLimitCheck.retryAfter,
+        limits: rateLimitCheck.limits,
+      });
+    }
+
+    // 3. Verificar límite mensual del plan
+    const usageStats = await this.tenantService.getUsageStats(tenantId);
+    if (usageStats.usage.messages.current >= usageStats.usage.messages.limit) {
+      throw new BadRequestException('Límite de mensajes del plan alcanzado');
+    }
+
     try {
-      // Formatear número (asegurar que solo tenga dígitos)
+      // 4. Formatear número (asegurar que solo tenga dígitos)
       const cleanNumber = sendMessageDto.to.replace(/\D/g, '');
 
-      // Buscar o crear conversación
+      // 5. Buscar o crear conversación
       let conversation = await this.conversationRepository.findOne({
         where: {
           instanceId: instanceId,
@@ -398,46 +432,53 @@ export class WhatsAppService {
         await this.conversationRepository.save(conversation);
       }
 
-      // Enviar mensaje a través de Evolution API
-      const evolutionResponse = await this.evolutionApiService.sendTextMessage(
-        instance.data.instanceKey,
-        cleanNumber,
-        sendMessageDto.text,
-      );
-
-      // Guardar mensaje en la base de datos
+      // 6. Guardar mensaje en la base de datos con estado PENDING
       const message = this.messageRepository.create({
         conversationId: conversation.id,
         content: sendMessageDto.text,
         type: MessageType.TEXT,
         direction: MessageDirection.OUTBOUND,
-        status: MessageStatus.SENT,
+        status: MessageStatus.PENDING,
         media: null,
         aiContext: null,
       });
 
-      await this.messageRepository.save(message);
+      const savedMessage = await this.messageRepository.save(message);
 
-      // Actualizar última actividad de la conversación
+      // 7. Agregar a la cola de mensajes para procesamiento asíncrono
+      const job = await this.messageQueueService.queueMessage({
+        instanceId: instance.data.id,
+        to: cleanNumber,
+        text: sendMessageDto.text,
+        messageId: savedMessage.id,
+        priority: tenant.plan === 'enterprise' ? 1 : 0, // Mayor prioridad para enterprise
+      });
+
+      // 8. Actualizar última actividad de la conversación
       conversation.lastMessageAt = new Date();
       await this.conversationRepository.save(conversation);
 
+      this.logger.log(`Mensaje ${savedMessage.id} agregado a la cola para envío`);
+
       return {
-        message: 'Mensaje enviado exitosamente',
+        message: 'Mensaje agregado a la cola de envío',
         data: {
-          message,
+          message: savedMessage,
           conversation,
-          evolutionResponse,
+          job: {
+            id: job.id,
+            status: 'queued'
+          },
         },
       };
     } catch (error) {
-      this.logger.error(`Error sending message: ${error.message}`);
+      this.logger.error(`Error queueing message: ${error.message}`);
       
-      if (error.response?.data?.message) {
-        throw new BadRequestException(`Error al enviar mensaje: ${error.response.data.message}`);
+      if (error instanceof BadRequestException) {
+        throw error;
       }
       
-      throw new BadRequestException('Error al enviar el mensaje');
+      throw new BadRequestException('Error al procesar el mensaje');
     }
   }
 
@@ -730,5 +771,156 @@ export class WhatsAppService {
   private async handlePresenceUpdate(instance: WhatsAppInstance, data: any) {
     // Log para debugging, pero generalmente no necesitas hacer nada con esto
     this.logger.debug(`Actualización de presencia en instancia ${instance.name}`);
+  }
+
+  /**
+   * Obtener estadísticas de la cola
+   */
+  async getQueueStats() {
+    return this.messageQueueService.getQueueStats();
+  }
+
+  /**
+   * Obtener uso de rate limit
+   */
+  async getRateLimitUsage(tenantId: string) {
+    const tenant = await this.tenantRepository.findOne({
+      where: { id: tenantId }
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant no encontrado');
+    }
+
+    return this.rateLimitService.getCurrentUsage(tenantId, tenant.plan);
+  }
+
+  /**
+   * Reintentar mensajes fallidos del tenant
+   */
+  async retryFailedMessages(tenantId: string) {
+    // Por ahora reintenta todos, en el futuro filtrar por tenant
+    const retriedCount = await this.messageQueueService.retryFailedMessages();
+    
+    return {
+      retriedMessages: retriedCount,
+      message: `${retriedCount} mensajes reintentados`,
+    };
+  }
+
+  /**
+   * Enviar mensajes masivos
+   */
+  async sendBulkMessages(
+    tenantId: string, 
+    instanceId: string, 
+    bulkMessageDto: {
+      recipients: string[];
+      text: string;
+      delayBetweenMessages?: number;
+    }
+  ) {
+    // Verificar instancia
+    const instance = await this.getInstance(tenantId, instanceId);
+    
+    if (instance.data.status !== InstanceStatus.CONNECTED) {
+      throw new BadRequestException('La instancia no está conectada');
+    }
+
+    // Verificar límites
+    const tenant = await this.tenantRepository.findOne({
+      where: { id: tenantId }
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant no encontrado');
+    }
+
+    // Limpiar números
+    const cleanRecipients = bulkMessageDto.recipients.map(num => num.replace(/\D/g, ''));
+
+    // Verificar que no exceda el límite diario
+    const rateLimitCheck = await this.rateLimitService.canSendMessage(tenantId, tenant.plan);
+    if (!rateLimitCheck.allowed) {
+      throw new BadRequestException({
+        message: 'Límite de mensajes excedido. Intenta más tarde.',
+        retryAfter: rateLimitCheck.retryAfter,
+      });
+    }
+
+    // Agregar a la cola con delay entre mensajes
+    const result = await this.messageQueueService.queueBulkMessages({
+      instanceId: instance.data.id,
+      recipients: cleanRecipients,
+      text: bulkMessageDto.text,
+      delayBetweenMessages: bulkMessageDto.delayBetweenMessages || 3000,
+    });
+
+    return {
+      message: 'Mensajes masivos agregados a la cola',
+      data: result,
+    };
+  }
+
+  /**
+   * Programar mensaje
+   */
+  async scheduleMessage(
+    tenantId: string,
+    instanceId: string,
+    scheduleDto: {
+      to: string;
+      text: string;
+      sendAt: string;
+    }
+  ) {
+    // Verificar instancia
+    const instance = await this.getInstance(tenantId, instanceId);
+
+    // Verificar fecha
+    const sendAt = new Date(scheduleDto.sendAt);
+    if (sendAt <= new Date()) {
+      throw new BadRequestException('La fecha de envío debe ser futura');
+    }
+
+    // Limpiar número
+    const cleanNumber = scheduleDto.to.replace(/\D/g, '');
+
+    // Crear conversación si no existe
+    let conversation = await this.conversationRepository.findOne({
+      where: {
+        instanceId: instanceId,
+        contactNumber: cleanNumber,
+      },
+    });
+
+    if (!conversation) {
+      conversation = this.conversationRepository.create({
+        instanceId: instanceId,
+        contactNumber: cleanNumber,
+        contactName: cleanNumber,
+        status: ConversationStatus.ACTIVE,
+        unreadCount: 0,
+        metadata: {},
+      });
+      await this.conversationRepository.save(conversation);
+    }
+
+    // Programar mensaje
+    const job = await this.messageQueueService.scheduleMessage({
+      instanceId: instance.data.id,
+      to: cleanNumber,
+      text: scheduleDto.text,
+      sendAt,
+    });
+
+    return {
+      message: 'Mensaje programado exitosamente',
+      data: {
+        jobId: job.id,
+        scheduledFor: sendAt,
+        to: cleanNumber,
+      },
+    };
   }
 }
