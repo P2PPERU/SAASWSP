@@ -1,74 +1,41 @@
 version: '3.8'
 
 services:
-  postgres:
+  # PostgreSQL para tu backend (base de datos separada de Evolution API)
+  postgres_backend:
     image: postgres:15-alpine
     container_name: whatsapp_saas_db
     restart: always
     ports:
-      - '5432:5432'
+      - '5433:5432'  # Puerto 5433 para no conflictuar con el PostgreSQL de Evolution
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: whatsapp_saas
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_backend_data:/var/lib/postgresql/data
     networks:
-      - whatsapp_network
+      - whatsapp_backend_network
 
-  redis:
-    image: redis:7-alpine
-    container_name: whatsapp_saas_redis
-    restart: always
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis_data:/data
-    networks:
-      - whatsapp_network
+  # Redis compartido - comentado porque usaremos el de Evolution API
+  # redis_backend:
+  #   image: redis:7-alpine
+  #   container_name: whatsapp_saas_redis
+  #   restart: always
+  #   ports:
+  #     - '6380:6379'  # Puerto diferente si necesitas tu propio Redis
+  #   volumes:
+  #     - redis_backend_data:/data
+  #   networks:
+  #     - whatsapp_backend_network
 
-  evolution-api:
-    image: atendai/evolution-api:v2.1.1
-    container_name: evolution_api
-    restart: unless-stopped
-    ports:
-      - '8080:8080'
-    environment:
-      - AUTHENTICATION_TYPE=apikey
-      - AUTHENTICATION_API_KEY=B6D711FCDE4D4FD5936544120E713976
-      - SERVER_URL=http://localhost:8080
-      - CORS_ORIGIN=*
-      - LOG_LEVEL=ERROR
-      - DATABASE_ENABLED=true
-      - DATABASE_PROVIDER=postgresql
-      - DATABASE_CONNECTION_URI=postgresql://postgres:postgres@whatsapp_saas_db:5432/whatsapp_saas?schema=public
-      - DATABASE_HOST=whatsapp_saas_db
-      - DATABASE_PORT=5432
-      - DATABASE_USER=postgres
-      - DATABASE_PASSWORD=postgres
-      - DATABASE_NAME=whatsapp_saas
-      - DATABASE_CONNECTION_CLIENT_NAME=evolution_api
-      - DATABASE_CONNECTION_SSL=false
-      - REDIS_ENABLED=true
-      - REDIS_HOST=whatsapp_saas_redis
-      - REDIS_PORT=6379
-      - RABBITMQ_ENABLED=false
-      - WEBSOCKET_ENABLED=false
-    volumes:
-      - evolution_instances:/evolution/instances
-      - evolution_store:/evolution/store
-    depends_on:
-      - postgres
-      - redis
-    networks:
-      - whatsapp_network
+  # Evolution API ahora corre externamente en el puerto 8080
+  # desde el repositorio clonado de evolution-api
 
 volumes:
-  postgres_data:
-  redis_data:
-  evolution_instances:
-  evolution_store:
+  postgres_backend_data:
+  # redis_backend_data:
 
 networks:
-  whatsapp_network:
+  whatsapp_backend_network:
     driver: bridge
