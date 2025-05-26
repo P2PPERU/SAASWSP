@@ -13,6 +13,7 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantModule } from './modules/tenant/tenant.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { AIModule } from './modules/ai/ai.module';
 
 // Guards existentes
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
@@ -49,6 +50,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     AuthModule,
     TenantModule,
     WhatsAppModule,
+    AIModule,
     
     // Agrega estos módulos cuando los crees:
     // AnalyticsModule,

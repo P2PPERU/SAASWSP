@@ -5,3 +5,4 @@ export * from './user.entity';
 export * from './whatsapp-instance.entity';
 export * from './conversation.entity';
 export * from './message.entity';
+export * from './ai-profile.entity';

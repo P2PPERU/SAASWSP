@@ -26,11 +26,13 @@ import { MessageProcessor } from './processors/message.processor';
 
 // Modules externos
 import { TenantModule } from '../tenant/tenant.module';
+import { AIModule } from '../ai/ai.module';
 
 @Module({
   imports: [
     ConfigModule,
     TenantModule, // Importar TenantModule para usar TenantService
+    AIModule, // Importar AIModule para usar AICoreService
     TypeOrmModule.forFeature([
       WhatsAppInstance, 
       Conversation, 

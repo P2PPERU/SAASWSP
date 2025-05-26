@@ -9,6 +9,7 @@ import { RateLimitService } from './services/rate-limit.service';
 import { TenantService } from '../tenant/tenant.service';
 import { CreateInstanceDto, SendMessageDto, UpdateInstanceDto } from './dto';
 import { v4 as uuidv4 } from 'uuid';
+import { AICoreService } from '../ai/services/ai-core.service';
 // Importar tipos desde el index centralizado
 import { 
   InstanceStatus,
@@ -39,6 +40,7 @@ export class WhatsAppService {
     private readonly rateLimitService: RateLimitService,
     private readonly tenantService: TenantService,
     private readonly configService: ConfigService,
+    private readonly aiCoreService: AICoreService,
   ) {}
 
   /**
@@ -616,6 +618,9 @@ export class WhatsAppService {
   /**
    * Manejar nuevo mensaje
    */
+  /**
+   * Manejar nuevo mensaje - VERSIÓN CON IA
+   */
   private async handleNewMessage(instance: WhatsAppInstance, data: any) {
     // Evolution v2 estructura del mensaje
     const messages = Array.isArray(data) ? data : [data];
@@ -720,6 +725,88 @@ export class WhatsAppService {
         await this.conversationRepository.save(conversation);
 
         this.logger.log(`Nuevo mensaje de ${contactNumber}: ${messageText.substring(0, 50)}...`);
+        
+        // ===== INTEGRACIÓN CON IA =====
+        // Solo procesar mensajes de texto para IA (por ahora)
+        if (messageType === MessageType.TEXT && messageText && messageText.trim().length > 0) {
+          try {
+            // Verificar si la IA debe responder
+            const shouldRespond = await this.aiCoreService.shouldRespond(
+              messageText,
+              conversation.id,
+              instance.tenantId
+            );
+
+            if (shouldRespond) {
+              this.logger.log(`IA activada para responder a ${contactNumber}`);
+              
+              // Generar respuesta con IA
+              const aiResponse = await this.aiCoreService.generateResponse(
+                messageText,
+                conversation.id,
+                instance.tenantId
+              );
+
+              if (aiResponse) {
+                // Obtener el tenant para el rate limiting
+                const tenant = await this.tenantRepository.findOne({
+                  where: { id: instance.tenantId }
+                });
+
+                if (!tenant) {
+                  this.logger.error('Tenant no encontrado para respuesta de IA');
+                  continue;
+                }
+
+                // Verificar rate limit antes de enviar
+                const rateLimitCheck = await this.rateLimitService.canSendMessage(
+                  instance.tenantId, 
+                  tenant.plan
+                );
+
+                if (rateLimitCheck.allowed) {
+                  // Guardar la respuesta de IA en la BD
+                  const aiMessage = this.messageRepository.create({
+                    conversationId: conversation.id,
+                    content: aiResponse,
+                    type: MessageType.TEXT,
+                    direction: MessageDirection.OUTBOUND,
+                    status: MessageStatus.PENDING,
+                    media: null,
+                    aiContext: {
+                      generatedByAI: true,
+                      model: 'gpt-3.5-turbo',
+                      timestamp: new Date().toISOString(),
+                    },
+                  });
+
+                  const savedAIMessage = await this.messageRepository.save(aiMessage);
+
+                  // Enviar respuesta a través de la cola de mensajes
+                  await this.messageQueueService.queueMessage({
+                    instanceId: instance.id,
+                    to: contactNumber,
+                    text: aiResponse,
+                    messageId: savedAIMessage.id,
+                    priority: 1, // Alta prioridad para respuestas de IA
+                  });
+
+                  this.logger.log(`Respuesta de IA encolada para ${contactNumber}`);
+                } else {
+                  this.logger.warn(`Rate limit excedido, no se puede enviar respuesta de IA`);
+                }
+              } else {
+                this.logger.log('IA no generó respuesta para este mensaje');
+              }
+            } else {
+              this.logger.log('IA configurada para no responder en este momento');
+            }
+          } catch (aiError) {
+            this.logger.error(`Error en procesamiento de IA: ${aiError.message}`);
+            // No fallar el procesamiento del mensaje si la IA falla
+          }
+        }
+        // ===== FIN INTEGRACIÓN CON IA =====
         
         // TODO: Aquí puedes emitir un evento o notificar a través de WebSocket
       } catch (error) {
