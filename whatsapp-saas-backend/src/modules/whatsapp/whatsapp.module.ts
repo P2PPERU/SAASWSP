@@ -14,27 +14,29 @@ import { WhatsAppController } from './whatsapp.controller';
 // Services
 import { WhatsAppService } from './whatsapp.service';
 import { EvolutionApiService } from './services/evolution-api.service';
+import { SyncService } from './services/sync.service';
+import { MessageQueueService } from './services/message-queue.service';
+import { RateLimitService } from './services/rate-limit.service';
 
 // Guards
 import { WebhookSecurityGuard } from './guards/webhook-security.guard';
 
-// Nuevos servicios (los crearemos después si no existen)
-// import { SyncService } from './services/sync.service';
-// import { MessageQueueService } from './services/message-queue.service';
-// import { RateLimitService } from './services/rate-limit.service';
+// Processors
+import { MessageProcessor } from './processors/message.processor';
 
-// Processors (los crearemos después si no existen)
-// import { MessageProcessor } from './processors/message.processor';
+// Modules externos
+import { TenantModule } from '../tenant/tenant.module';
 
 @Module({
   imports: [
     ConfigModule,
+    TenantModule, // Importar TenantModule para usar TenantService
     TypeOrmModule.forFeature([
       WhatsAppInstance, 
       Conversation, 
       Message,
-      Tenant, // Agregado para verificar límites
-      User    // Agregado para tracking
+      Tenant,
+      User
     ]),
     HttpModule.register({
       timeout: 30000,
@@ -58,19 +60,17 @@ import { WebhookSecurityGuard } from './guards/webhook-security.guard';
   providers: [
     WhatsAppService, 
     EvolutionApiService,
-    WebhookSecurityGuard, // Agregado el Guard como provider
-    // Descomenta estos servicios cuando los crees:
-    // SyncService,
-    // MessageQueueService,
-    // RateLimitService,
-    // MessageProcessor,
+    WebhookSecurityGuard,
+    SyncService,
+    MessageQueueService,
+    RateLimitService,
+    MessageProcessor,
   ],
   exports: [
     WhatsAppService, 
     EvolutionApiService,
-    // Exporta también los nuevos servicios cuando los agregues:
-    // MessageQueueService,
-    // RateLimitService,
+    MessageQueueService,
+    RateLimitService,
   ],
 })
 export class WhatsAppModule {}
