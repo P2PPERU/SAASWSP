@@ -1,3 +1,4 @@
+// src/modules/whatsapp/whatsapp.module.ts
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
@@ -13,6 +14,9 @@ import { WhatsAppController } from './whatsapp.controller';
 // Services
 import { WhatsAppService } from './whatsapp.service';
 import { EvolutionApiService } from './services/evolution-api.service';
+
+// Guards
+import { WebhookSecurityGuard } from './guards/webhook-security.guard';
 
 // Nuevos servicios (los crearemos después si no existen)
 // import { SyncService } from './services/sync.service';
@@ -54,6 +58,7 @@ import { EvolutionApiService } from './services/evolution-api.service';
   providers: [
     WhatsAppService, 
     EvolutionApiService,
+    WebhookSecurityGuard, // Agregado el Guard como provider
     // Descomenta estos servicios cuando los crees:
     // SyncService,
     // MessageQueueService,

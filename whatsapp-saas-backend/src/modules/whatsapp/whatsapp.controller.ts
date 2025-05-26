@@ -1,3 +1,4 @@
+// src/modules/whatsapp/whatsapp.controller.ts
 import {
   Controller,
   Get,
@@ -11,6 +12,7 @@ import {
   HttpStatus,
   Logger,
   Req,
+  All,
 } from '@nestjs/common';
 import { WhatsAppService } from './whatsapp.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -19,6 +21,7 @@ import { CreateInstanceDto, SendMessageDto, UpdateInstanceDto } from './dto';
 import { User } from '../../database/entities';
 import { Public } from '../auth/decorators/public.decorator';
 import { Request } from 'express';
+import { WebhookSecurityGuard } from './guards/webhook-security.guard';
 
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard)
@@ -125,8 +128,7 @@ export class WhatsAppController {
     @CurrentUser() user: User,
     @Param('instanceId') instanceId: string,
   ) {
-    // TODO: Implementar en el servicio
-    return { message: 'Endpoint pendiente de implementación' };
+    return this.whatsAppService.getConversations(user.tenantId, instanceId);
   }
 
   /**
@@ -137,15 +139,15 @@ export class WhatsAppController {
     @CurrentUser() user: User,
     @Param('conversationId') conversationId: string,
   ) {
-    // TODO: Implementar en el servicio
-    return { message: 'Endpoint pendiente de implementación' };
+    return this.whatsAppService.getMessages(user.tenantId, conversationId);
   }
 
   /**
-   * Webhook para recibir eventos de Evolution API
-   * Este endpoint es público porque Evolution API necesita acceder a él
+   * Webhook principal para recibir eventos de Evolution API
+   * Este endpoint es público pero protegido por WebhookSecurityGuard
    */
   @Public()
+  @UseGuards(WebhookSecurityGuard)
   @Post('webhook/:instanceId')
   @HttpCode(HttpStatus.OK)
   async handleWebhook(
@@ -158,7 +160,180 @@ export class WhatsAppController {
     this.logger.debug(`Headers: ${JSON.stringify(request.headers)}`);
     this.logger.debug(`Body: ${JSON.stringify(webhookData)}`);
     
+    // Si el body está vacío pero viene en raw body
+    if (!webhookData || Object.keys(webhookData).length === 0) {
+      this.logger.warn('Body vacío recibido, verificando raw body...');
+      // El body podría estar en request.body si express.json() lo procesó
+    }
+    
     await this.whatsAppService.processWebhook(instanceId, webhookData);
+    return { status: 'ok' };
+  }
+
+  /**
+   * Webhook específico para messages.upsert (cuando webhook_by_events está activo)
+   */
+  @Public()
+  @UseGuards(WebhookSecurityGuard)
+  @Post('webhook/:instanceId/messages-upsert')
+  @HttpCode(HttpStatus.OK)
+  async handleMessagesUpsert(
+    @Param('instanceId') instanceId: string,
+    @Body() webhookData: any,
+    @Req() request: Request,
+  ) {
+    this.logger.log(`🔔 messages.upsert webhook para instancia: ${instanceId}`);
+    
+    // Crear estructura esperada por processWebhook
+    const formattedData = {
+      event: 'messages.upsert',
+      instance: instanceId,
+      data: webhookData.data || webhookData
+    };
+    
+    await this.whatsAppService.processWebhook(instanceId, formattedData);
+    return { status: 'ok' };
+  }
+
+  /**
+   * Webhook específico para connection.update
+   */
+  @Public()
+  @UseGuards(WebhookSecurityGuard)
+  @Post('webhook/:instanceId/connection-update')
+  @HttpCode(HttpStatus.OK)
+  async handleConnectionUpdate(
+    @Param('instanceId') instanceId: string,
+    @Body() webhookData: any,
+  ) {
+    this.logger.log(`🔔 connection.update webhook para instancia: ${instanceId}`);
+    
+    const formattedData = {
+      event: 'connection.update',
+      instance: instanceId,
+      data: webhookData.data || webhookData
+    };
+    
+    await this.whatsAppService.processWebhook(instanceId, formattedData);
+    return { status: 'ok' };
+  }
+
+  /**
+   * Webhook específico para presence.update
+   */
+  @Public()
+  @UseGuards(WebhookSecurityGuard)
+  @Post('webhook/:instanceId/presence-update')
+  @HttpCode(HttpStatus.OK)
+  async handlePresenceUpdate(
+    @Param('instanceId') instanceId: string,
+    @Body() webhookData: any,
+  ) {
+    this.logger.log(`🔔 presence.update webhook para instancia: ${instanceId}`);
+    
+    const formattedData = {
+      event: 'presence.update',
+      instance: instanceId,
+      data: webhookData.data || webhookData
+    };
+    
+    await this.whatsAppService.processWebhook(instanceId, formattedData);
+    return { status: 'ok' };
+  }
+
+  /**
+   * Webhook específico para qrcode.updated
+   */
+  @Public()
+  @UseGuards(WebhookSecurityGuard)
+  @Post('webhook/:instanceId/qrcode-updated')
+  @HttpCode(HttpStatus.OK)
+  async handleQRCodeUpdated(
+    @Param('instanceId') instanceId: string,
+    @Body() webhookData: any,
+  ) {
+    this.logger.log(`🔔 qrcode.updated webhook para instancia: ${instanceId}`);
+    
+    const formattedData = {
+      event: 'qrcode.updated',
+      instance: instanceId,
+      data: webhookData.data || webhookData
+    };
+    
+    await this.whatsAppService.processWebhook(instanceId, formattedData);
+    return { status: 'ok' };
+  }
+
+  /**
+   * Webhook específico para chats.update
+   */
+  @Public()
+  @UseGuards(WebhookSecurityGuard)
+  @Post('webhook/:instanceId/chats-update')
+  @HttpCode(HttpStatus.OK)
+  async handleChatsUpdate(
+    @Param('instanceId') instanceId: string,
+    @Body() webhookData: any,
+  ) {
+    this.logger.log(`🔔 chats.update webhook para instancia: ${instanceId}`);
+    
+    const formattedData = {
+      event: 'chats.update',
+      instance: instanceId,
+      data: webhookData.data || webhookData
+    };
+    
+    await this.whatsAppService.processWebhook(instanceId, formattedData);
+    return { status: 'ok' };
+  }
+
+  /**
+   * Webhook específico para contacts.update
+   */
+  @Public()
+  @UseGuards(WebhookSecurityGuard)
+  @Post('webhook/:instanceId/contacts-update')
+  @HttpCode(HttpStatus.OK)
+  async handleContactsUpdate(
+    @Param('instanceId') instanceId: string,
+    @Body() webhookData: any,
+  ) {
+    this.logger.log(`🔔 contacts.update webhook para instancia: ${instanceId}`);
+    
+    const formattedData = {
+      event: 'contacts.update',
+      instance: instanceId,
+      data: webhookData.data || webhookData
+    };
+    
+    await this.whatsAppService.processWebhook(instanceId, formattedData);
+    return { status: 'ok' };
+  }
+
+  /**
+   * Webhook genérico para cualquier otro evento (catch-all)
+   */
+  @Public()
+  @UseGuards(WebhookSecurityGuard)
+  @All('webhook/:instanceId/:eventType')
+  @HttpCode(HttpStatus.OK)
+  async handleGenericWebhook(
+    @Param('instanceId') instanceId: string,
+    @Param('eventType') eventType: string,
+    @Body() webhookData: any,
+  ) {
+    this.logger.log(`🔔 ${eventType} webhook para instancia: ${instanceId}`);
+    
+    // Convertir event-type a event.type
+    const eventName = eventType.replace('-', '.');
+    
+    const formattedData = {
+      event: eventName,
+      instance: instanceId,
+      data: webhookData.data || webhookData
+    };
+    
+    await this.whatsAppService.processWebhook(instanceId, formattedData);
     return { status: 'ok' };
   }
 }
