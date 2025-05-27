@@ -636,6 +636,13 @@ export class WhatsAppService {
         }
 
         const contactNumber = key.remoteJid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+            
+        // ⬇️ AGREGAR AQUÍ EL NUEVO FILTRO ⬇️
+        if (key.remoteJid.includes('@g.us') || contactNumber.includes('-')) {
+          this.logger.log('Ignorando mensaje de grupo');
+          continue;
+        }
+        // ⬆️ FIN DEL NUEVO CÓDIGO ⬆️
 
         // Buscar o crear conversación
         let conversation = await this.conversationRepository.findOne({

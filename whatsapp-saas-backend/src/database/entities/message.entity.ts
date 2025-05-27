@@ -67,6 +67,8 @@ export class Message extends BaseEntity {
     generatedByAI?: boolean;
     model?: string;
     timestamp?: Date | string;
+    originalMessage?: string;
+    responseToMessageId?: string;
   };
 
   @Column()
