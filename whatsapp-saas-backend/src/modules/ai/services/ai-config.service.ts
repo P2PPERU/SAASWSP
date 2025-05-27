@@ -8,7 +8,7 @@ import {
   AIProfile, 
   AIModel, 
   AIPersonality,
-  AIResponseMode,  // <-- AGREGADO
+  AIResponseMode,
   Message,
   MessageDirection,
   Conversation
@@ -114,98 +114,154 @@ export class AIConfigService {
   }
 
   /**
-   * Obtener estadísticas de uso
+   * Obtener estadísticas de uso - VERSIÓN CORREGIDA
    */
   async getStats(
     tenantId: string, 
     period: 'today' | 'week' | 'month'
   ): Promise<AIStatsResponseDto> {
-    const profile = await this.getConfig(tenantId);
-    const { startDate, endDate, days } = this.getPeriodDates(period);
+    try {
+      const profile = await this.getConfig(tenantId);
+      const { startDate, endDate, days } = this.getPeriodDates(period);
 
-    // Obtener mensajes del periodo
-    const messages = await this.messageRepository
-      .createQueryBuilder('message')
-      .leftJoin('message.conversation', 'conversation')
-      .leftJoin('conversation.instance', 'instance')
-      .where('instance.tenantId = :tenantId', { tenantId })
-      .andWhere('message.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate })
-      .getMany();
+      // Inicializar valores por defecto
+      let totalMessages = 0;
+      let handledByAI = 0;
+      let handledByHuman = 0;
+      let aiResponseRate = 0;
 
-    // Calcular métricas
-    const totalMessages = messages.length;
-    const aiMessages = messages.filter(m => m.aiContext?.generatedByAI === true);
-    const handledByAI = aiMessages.length;
-    const handledByHuman = totalMessages - handledByAI;
-    const aiResponseRate = totalMessages > 0 ? (handledByAI / totalMessages) * 100 : 0;
+      try {
+        // Obtener mensajes del periodo - con manejo de error
+        const messages = await this.messageRepository
+          .createQueryBuilder('message')
+          .leftJoin('message.conversation', 'conversation')
+          .leftJoin('conversation.instance', 'instance')
+          .where('instance.tenantId = :tenantId', { tenantId })
+          .andWhere('message.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate })
+          .getMany();
 
-    // Calcular tiempo promedio de respuesta (simulado por ahora)
-    const averageResponseTime = 1.5; // segundos
+        // Calcular métricas
+        totalMessages = messages.length;
+        const aiMessages = messages.filter(m => m.aiContext?.generatedByAI === true);
+        handledByAI = aiMessages.length;
+        handledByHuman = totalMessages - handledByAI;
+        aiResponseRate = totalMessages > 0 ? (handledByAI / totalMessages) * 100 : 0;
+      } catch (dbError) {
+        this.logger.warn(`Error obteniendo mensajes para estadísticas: ${dbError.message}`);
+        // Continuar con valores por defecto
+      }
 
-    // Calcular tokens usados
-    const tokensUsed = profile.usage.tokensToday || 0;
-    const estimatedCost = this.calculateCost(tokensUsed, profile.model);
+      // Valores por defecto o calculados
+      const averageResponseTime = 1.5; // segundos
+      const tokensUsed = profile.usage.tokensToday || 0;
+      const estimatedCost = this.calculateCost(tokensUsed, profile.model);
 
-    // Analizar intenciones (placeholder - implementaremos después)
-    const topIntents = [
-      { intent: 'QUESTION_PRODUCT', count: Math.floor(handledByAI * 0.4), percentage: 40 },
-      { intent: 'QUESTION_PRICE', count: Math.floor(handledByAI * 0.3), percentage: 30 },
-      { intent: 'GREETING', count: Math.floor(handledByAI * 0.2), percentage: 20 },
-      { intent: 'SUPPORT', count: Math.floor(handledByAI * 0.1), percentage: 10 },
-    ];
+      // Analizar intenciones (simulado por ahora)
+      const topIntents = handledByAI > 0 ? [
+        { intent: 'QUESTION_PRODUCT', count: Math.floor(handledByAI * 0.4), percentage: 40 },
+        { intent: 'QUESTION_PRICE', count: Math.floor(handledByAI * 0.3), percentage: 30 },
+        { intent: 'GREETING', count: Math.floor(handledByAI * 0.2), percentage: 20 },
+        { intent: 'SUPPORT', count: Math.floor(handledByAI * 0.1), percentage: 10 },
+      ] : [];
 
-    // Calcular valor generado
-    const avgHandlingTime = 2; // minutos por conversación manual
-    const timeSaved = handledByAI * avgHandlingTime;
-    const conversationsAutomated = await this.countAutomatedConversations(tenantId, startDate, endDate);
+      // Calcular valor generado
+      const avgHandlingTime = 2; // minutos por conversación manual
+      const timeSaved = handledByAI * avgHandlingTime;
+      let conversationsAutomated = 0;
+      
+      try {
+        conversationsAutomated = await this.countAutomatedConversations(tenantId, startDate, endDate);
+      } catch (error) {
+        this.logger.warn(`Error contando conversaciones automatizadas: ${error.message}`);
+      }
 
-    return {
-      period: {
-        start: startDate.toISOString(),
-        end: endDate.toISOString(),
-        days,
-      },
-      messages: {
-        total: totalMessages,
-        handledByAI,
-        handledByHuman,
-        aiResponseRate,
-      },
-      performance: {
-        averageResponseTime,
-        successRate: 95, // Placeholder
-        tokensUsed,
-        estimatedCost,
-      },
-      topIntents,
-      value: {
-        timeSaved,
-        conversationsAutomated,
-        customerSatisfaction: 92, // Placeholder
-      },
-      usage: {
-        daily: {
-          tokens: {
-            used: profile.usage.tokensToday || 0,
-            limit: profile.limits.maxTokensPerDay || 10000,
-            percentage: ((profile.usage.tokensToday || 0) / (profile.limits.maxTokensPerDay || 10000)) * 100,
+      return {
+        period: {
+          start: startDate.toISOString(),
+          end: endDate.toISOString(),
+          days,
+        },
+        messages: {
+          total: totalMessages,
+          handledByAI,
+          handledByHuman,
+          aiResponseRate: Math.round(aiResponseRate * 100) / 100,
+        },
+        performance: {
+          averageResponseTime,
+          successRate: 95, // Placeholder
+          tokensUsed,
+          estimatedCost,
+        },
+        topIntents,
+        value: {
+          timeSaved,
+          conversationsAutomated,
+          customerSatisfaction: 92, // Placeholder
+        },
+        usage: {
+          daily: {
+            tokens: {
+              used: profile.usage.tokensToday || 0,
+              limit: profile.limits.maxTokensPerDay || 10000,
+              percentage: Math.round(((profile.usage.tokensToday || 0) / (profile.limits.maxTokensPerDay || 10000)) * 10000) / 100,
+            },
+            conversations: {
+              used: profile.usage.conversationsToday || 0,
+              limit: profile.limits.maxConversationsPerDay || 100,
+              percentage: Math.round(((profile.usage.conversationsToday || 0) / (profile.limits.maxConversationsPerDay || 100)) * 10000) / 100,
+            },
           },
-          conversations: {
-            used: profile.usage.conversationsToday || 0,
-            limit: profile.limits.maxConversationsPerDay || 100,
-            percentage: ((profile.usage.conversationsToday || 0) / (profile.limits.maxConversationsPerDay || 100)) * 100,
+          monthly: {
+            tokens: {
+              used: profile.usage.tokensThisMonth || 0,
+              limit: profile.limits.maxTokensPerMonth || 100000,
+              percentage: Math.round(((profile.usage.tokensThisMonth || 0) / (profile.limits.maxTokensPerMonth || 100000)) * 10000) / 100,
+            },
+            estimatedCost: this.calculateCost(profile.usage.tokensThisMonth || 0, profile.model),
           },
         },
-        monthly: {
-          tokens: {
-            used: profile.usage.tokensThisMonth || 0,
-            limit: profile.limits.maxTokensPerMonth || 100000,
-            percentage: ((profile.usage.tokensThisMonth || 0) / (profile.limits.maxTokensPerMonth || 100000)) * 100,
-          },
-          estimatedCost: this.calculateCost(profile.usage.tokensThisMonth || 0, profile.model),
+      };
+    } catch (error) {
+      this.logger.error(`Error general en getStats: ${error.message}`);
+      // Retornar respuesta mínima válida
+      const { startDate, endDate, days } = this.getPeriodDates(period);
+      return {
+        period: {
+          start: startDate.toISOString(),
+          end: endDate.toISOString(),
+          days,
         },
-      },
-    };
+        messages: {
+          total: 0,
+          handledByAI: 0,
+          handledByHuman: 0,
+          aiResponseRate: 0,
+        },
+        performance: {
+          averageResponseTime: 0,
+          successRate: 0,
+          tokensUsed: 0,
+          estimatedCost: 0,
+        },
+        topIntents: [],
+        value: {
+          timeSaved: 0,
+          conversationsAutomated: 0,
+          customerSatisfaction: 0,
+        },
+        usage: {
+          daily: {
+            tokens: { used: 0, limit: 10000, percentage: 0 },
+            conversations: { used: 0, limit: 100, percentage: 0 },
+          },
+          monthly: {
+            tokens: { used: 0, limit: 100000, percentage: 0 },
+            estimatedCost: 0,
+          },
+        },
+      };
+    }
   }
 
   /**
@@ -410,6 +466,56 @@ Anima a los estudiantes potenciales a alcanzar sus metas educativas.`,
           },
         },
       },
+      {
+        industry: 'realestate',
+        config: {
+          systemPrompt: `Eres el asistente virtual de una inmobiliaria. 
+Ayudas a los clientes a encontrar propiedades, agendar visitas y responder consultas.
+Sé profesional, detallista y proactivo. 
+Conoces bien el mercado inmobiliario y puedes hacer recomendaciones personalizadas.`,
+          welcomeMessage: '¡Hola! 🏠 Bienvenido a nuestra inmobiliaria. ¿Estás buscando comprar, vender o alquilar una propiedad?',
+          personality: AIPersonality.PROFESSIONAL,
+          settings: {
+            temperature: 0.6,
+            maxTokens: 200,
+            responseDelay: 1500,
+            contextWindow: 10,
+            language: 'es',
+            industry: 'realestate',
+            tone: 'professional-consultative',
+          },
+          commonResponses: {
+            'busco': '¡Perfecto! Para ayudarte mejor, ¿podrías decirme qué tipo de propiedad buscas y en qué zona?',
+            'precio': 'Los precios varían según la zona y características. ¿Cuál es tu presupuesto aproximado?',
+            'visita': 'Con gusto coordinamos una visita. ¿Qué días y horarios te quedan más cómodos?',
+          },
+        },
+      },
+      {
+        industry: 'fitness',
+        config: {
+          systemPrompt: `Eres el asistente virtual de un gimnasio/centro fitness. 
+Ayudas con información sobre membresías, clases, horarios y entrenamientos.
+Sé motivador, energético y positivo. 
+Promueve un estilo de vida saludable sin ser intrusivo.`,
+          welcomeMessage: '¡Hola! 💪 Bienvenido a nuestro centro fitness. ¿Te interesa conocer nuestras membresías, clases o necesitas información sobre entrenamientos?',
+          personality: AIPersonality.FRIENDLY,
+          settings: {
+            temperature: 0.8,
+            maxTokens: 150,
+            responseDelay: 1200,
+            contextWindow: 5,
+            language: 'es',
+            industry: 'fitness',
+            tone: 'energetic-motivational',
+          },
+          commonResponses: {
+            'clases': '¡Tenemos muchas opciones! Yoga, spinning, crossfit, zumba y más. ¿Qué tipo de actividad prefieres?',
+            'horario': 'Abrimos de lunes a viernes de 6:00 a 22:00, sábados de 7:00 a 20:00 y domingos de 8:00 a 14:00.',
+            'precio': 'Tenemos diferentes planes según tus necesidades. ¿Prefieres acceso completo o solo a ciertas actividades?',
+          },
+        },
+      },
     ];
   }
 
@@ -479,7 +585,7 @@ Anima a los estudiantes potenciales a alcanzar sus metas educativas.`,
       enabled: false,
       model: AIModel.GPT_35_TURBO,
       personality: AIPersonality.FRIENDLY,
-      responseMode: AIResponseMode.ALWAYS,  // <-- CORREGIDO: Usar enum
+      responseMode: AIResponseMode.ALWAYS,
       systemPrompt: this.getDefaultSystemPrompt(),
       welcomeMessage: '¡Hola! Soy tu asistente virtual. ¿En qué puedo ayudarte hoy?',
       businessHours: {},
@@ -508,7 +614,7 @@ Anima a los estudiantes potenciales a alcanzar sus metas educativas.`,
     });
 
     const savedProfile = await this.aiProfileRepository.save(profile);
-    return savedProfile;  // <-- CORREGIDO: Retornar el objeto guardado
+    return savedProfile;
   }
 
   private mapToResponseDto(profile: AIProfile): AIConfigResponseDto {
@@ -518,7 +624,7 @@ Anima a los estudiantes potenciales a alcanzar sus metas educativas.`,
       enabled: profile.enabled,
       model: profile.model,
       personality: profile.personality,
-      responseMode: profile.responseMode,  // <-- CORREGIDO: Quitar "as any"
+      responseMode: profile.responseMode,
       systemPrompt: profile.systemPrompt,
       welcomeMessage: profile.welcomeMessage,
       businessHours: profile.businessHours,
@@ -592,18 +698,23 @@ Anima a los estudiantes potenciales a alcanzar sus metas educativas.`,
     startDate: Date, 
     endDate: Date
   ): Promise<number> {
-    const result = await this.conversationRepository
-      .createQueryBuilder('conversation')
-      .leftJoin('conversation.instance', 'instance')
-      .leftJoin('conversation.messages', 'message')
-      .where('instance.tenantId = :tenantId', { tenantId })
-      .andWhere('conversation.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate })
-      .andWhere('message.aiContext IS NOT NULL')
-      .andWhere(`message.aiContext->>'generatedByAI' = 'true'`)
-      .select('COUNT(DISTINCT conversation.id)', 'count')
-      .getRawOne();
+    try {
+      const result = await this.conversationRepository
+        .createQueryBuilder('conversation')
+        .leftJoin('conversation.instance', 'instance')
+        .leftJoin('conversation.messages', 'message')
+        .where('instance.tenantId = :tenantId', { tenantId })
+        .andWhere('conversation.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate })
+        .andWhere('message.aiContext IS NOT NULL')
+        .andWhere(`message.aiContext->>'generatedByAI' = 'true'`)
+        .select('COUNT(DISTINCT conversation.id)', 'count')
+        .getRawOne();
 
-    return parseInt(result?.count || '0');
+      return parseInt(result?.count || '0', 10);
+    } catch (error) {
+      this.logger.error(`Error en countAutomatedConversations: ${error.message}`);
+      return 0;
+    }
   }
 
   private getDefaultSystemPrompt(): string {
