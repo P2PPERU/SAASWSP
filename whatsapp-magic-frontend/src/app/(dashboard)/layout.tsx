@@ -10,6 +10,7 @@ import { useAuthStore } from "@/store/auth.store"
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: BarChart3 },
+  { name: 'WhatsApp', href: '/whatsapp/instances', icon: MessageSquare },
   { name: 'Inbox', href: '/inbox', icon: Inbox },
   { name: 'Configurar IA', href: '/ai', icon: Bot },
   { name: 'Campañas', href: '/campaigns', icon: Zap },
