@@ -33,13 +33,40 @@ export class EvolutionApiService {
   }
 
   /**
-   * Crear una nueva instancia de WhatsApp
-   * NOTA: Para crear instancias siempre usa la API Key global
+   * 🚀 NUEVO: Detectar la URL correcta para webhooks según el entorno
+   */
+  private getWebhookBaseUrl(): string {
+    // 1. Usar BACKEND_URL si está configurada (para Docker)
+    const backendUrl = this.configService.get<string>('BACKEND_URL');
+    if (backendUrl) {
+      this.logger.log(`📡 Using BACKEND_URL for webhooks: ${backendUrl}`);
+      return backendUrl;
+    }
+
+    // 2. Detectar si estamos en Docker
+    const dockerHostUrl = this.configService.get<string>('DOCKER_HOST_URL');
+    if (dockerHostUrl) {
+      this.logger.log(`🐳 Using DOCKER_HOST_URL for webhooks: ${dockerHostUrl}`);
+      return dockerHostUrl;
+    }
+
+    // 3. Fallback a localhost
+    const port = this.configService.get<number>('PORT', 3000);
+    const fallbackUrl = `http://localhost:${port}`;
+    this.logger.log(`🏠 Using fallback URL for webhooks: ${fallbackUrl}`);
+    return fallbackUrl;
+  }
+
+  /**
+   * 🔧 MEJORADO: Crear una nueva instancia de WhatsApp con webhooks automáticos
    */
   async createInstance(instanceName: string, tenantId: string): Promise<CreateInstanceResponse> {
     try {
       this.logger.log(`Creating instance: ${instanceName} for tenant: ${tenantId}`);
 
+      // 🚀 MEJORADO: Detectar la URL correcta para webhooks
+      const webhookBaseUrl = this.getWebhookBaseUrl();
+      
       const response = await firstValueFrom(
         this.httpService.post<CreateInstanceResponse>(
           `${this.apiUrl}/instance/create`,
@@ -47,9 +74,8 @@ export class EvolutionApiService {
             instanceName: instanceName,
             qrcode: true,
             integration: 'WHATSAPP-BAILEYS',
-            // Opcional: webhook automático
             webhook: {
-              url: `${this.configService.get('BACKEND_URL', 'http://localhost:3000')}/api/v1/whatsapp/webhook/${instanceName}`,
+              url: `${webhookBaseUrl}/api/v1/whatsapp/webhook/${instanceName}`,
               webhook_by_events: false,
               events: [
                 'APPLICATION_STARTUP',
@@ -60,32 +86,90 @@ export class EvolutionApiService {
                 'MESSAGES_DELETE',
                 'SEND_MESSAGE',
                 'CONNECTION_UPDATE',
+                // Agregar eventos adicionales útiles
+                'PRESENCE_UPDATE',
+                'CHATS_SET',
+                'CHATS_UPSERT',
+                'CHATS_UPDATE',
+                'CONTACTS_SET',
+                'CONTACTS_UPSERT',
+                'CONTACTS_UPDATE',
               ],
             },
           },
           {
             headers: {
-              'apikey': this.globalApiKey, // Usar API Key global para crear
+              'apikey': this.globalApiKey,
               'Content-Type': 'application/json',
             },
+            timeout: 30000, // 30 segundos timeout
           },
         ),
       );
 
-      this.logger.log(`Instance created successfully: ${instanceName}`);
+      this.logger.log(`✅ Instance created successfully: ${instanceName}`);
+      this.logger.log(`🌐 Webhook URL: ${webhookBaseUrl}/api/v1/whatsapp/webhook/${instanceName}`);
       
-      // CAMBIO: Log del hash directamente (es un string)
-      this.logger.log(`Instance API Key (hash): ${response.data.hash}`);
+      // 🔧 MEJORADO: Manejar diferentes formatos de API Key
+      const apiKey = this.extractApiKey(response.data.hash);
       
-      return response.data;
+      if (!apiKey) {
+        this.logger.error('❌ No API Key received from Evolution API');
+        this.logger.error(`Hash received: ${JSON.stringify(response.data.hash)}`);
+        throw new Error('No API Key received from Evolution API');
+      }
+      
+      this.logger.log(`🔑 Instance API Key received: ${apiKey.substring(0, 10)}...`);
+      
+      return {
+        ...response.data,
+        hash: apiKey, // Normalizar el formato
+      };
     } catch (error) {
-      this.logger.error(`Error creating instance: ${error.message}`);
+      this.logger.error(`❌ Error creating instance: ${error.message}`);
       if (error.response) {
-        this.logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
         this.logger.error(`Response status: ${error.response.status}`);
+        this.logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
       }
       throw error;
     }
+  }
+
+  /**
+   * 🔧 NUEVO: Extraer API Key de diferentes formatos
+   */
+  private extractApiKey(hash: any): string | null {
+    if (!hash) return null;
+    
+    // Si es string directo
+    if (typeof hash === 'string') {
+      return this.validateApiKey(hash) ? hash : null;
+    }
+    
+    // Si es objeto, buscar en diferentes propiedades
+    if (typeof hash === 'object') {
+      const possibleKeys = ['apikey', 'api_key', 'key', 'token'];
+      for (const key of possibleKeys) {
+        if (hash[key] && this.validateApiKey(hash[key])) {
+          return hash[key];
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * 🔧 NUEVO: Validar formato de API Key
+   */
+  private validateApiKey(apiKey: string): boolean {
+    if (!apiKey || typeof apiKey !== 'string') return false;
+    
+    // Evolution API keys suelen tener formato UUID o similar (32 caracteres hex)
+    const apiKeyRegex = /^[A-F0-9]{32}$/i;
+    const cleanKey = apiKey.replace(/-/g, '');
+    
+    return cleanKey.length >= 20 && (apiKeyRegex.test(cleanKey) || cleanKey.length === 32);
   }
 
   /**
@@ -100,6 +184,7 @@ export class EvolutionApiService {
             headers: {
               'apikey': this.getApiKey(instanceApiKey),
             },
+            timeout: 15000,
           },
         ),
       );
@@ -112,7 +197,7 @@ export class EvolutionApiService {
   }
 
   /**
-   * Obtener el estado de conexión de una instancia
+   * 🔧 MEJORADO: Obtener el estado de conexión de una instancia
    */
   async getInstanceStatus(instanceName: string, instanceApiKey?: string): Promise<ConnectionStateResponse> {
     try {
@@ -128,6 +213,7 @@ export class EvolutionApiService {
             headers: {
               'apikey': apiKeyToUse,
             },
+            timeout: 15000,
           },
         ),
       );
@@ -158,6 +244,7 @@ export class EvolutionApiService {
             headers: {
               'apikey': this.getApiKey(instanceApiKey),
             },
+            timeout: 30000, // Mayor timeout para QR generation
           },
         ),
       );
@@ -206,6 +293,7 @@ export class EvolutionApiService {
             headers: {
               'apikey': this.getApiKey(instanceApiKey),
             },
+            timeout: 15000,
           },
         ),
       );
@@ -230,6 +318,7 @@ export class EvolutionApiService {
             headers: {
               'apikey': this.getApiKey(instanceApiKey),
             },
+            timeout: 15000,
           },
         ),
       );
@@ -243,7 +332,7 @@ export class EvolutionApiService {
   }
 
   /**
-   * Enviar un mensaje de texto
+   * 🔧 MEJORADO: Enviar un mensaje de texto con mejor manejo de errores
    */
   async sendTextMessage(instanceName: string, to: string, text: string, instanceApiKey?: string): Promise<SendMessageResponse> {
     try {
@@ -263,6 +352,7 @@ export class EvolutionApiService {
               'apikey': this.getApiKey(instanceApiKey),
               'Content-Type': 'application/json',
             },
+            timeout: 30000, // 30 segundos para envío de mensaje
           },
         ),
       );
@@ -279,7 +369,7 @@ export class EvolutionApiService {
   }
 
   /**
-   * Configurar webhook para recibir eventos
+   * 🔧 MEJORADO: Configurar webhook para recibir eventos
    */
   async setWebhook(instanceName: string, webhookUrl: string, instanceApiKey?: string) {
     try {
@@ -304,7 +394,12 @@ export class EvolutionApiService {
                 'GROUPS_UPSERT',
                 'GROUPS_UPDATE',
                 'GROUP_PARTICIPANTS_UPDATE',
-                'NEW_JWT_TOKEN',
+                'CHATS_SET',
+                'CHATS_UPSERT',
+                'CHATS_UPDATE',
+                'CONTACTS_SET',
+                'CONTACTS_UPSERT',
+                'CONTACTS_UPDATE',
               ],
             },
           },
@@ -313,11 +408,13 @@ export class EvolutionApiService {
               'apikey': this.getApiKey(instanceApiKey),
               'Content-Type': 'application/json',
             },
+            timeout: 15000,
           },
         ),
       );
 
-      this.logger.log(`Webhook configured for instance: ${instanceName}`);
+      this.logger.log(`✅ Webhook configured for instance: ${instanceName}`);
+      this.logger.log(`🌐 Webhook URL: ${webhookUrl}`);
       return response.data;
     } catch (error) {
       this.logger.error(`Error setting webhook: ${error.message}`);
@@ -354,6 +451,7 @@ export class EvolutionApiService {
             headers: {
               'apikey': this.getApiKey(instanceApiKey),
             },
+            timeout: 30000, // Mayor timeout para restart
           },
         ),
       );
@@ -378,6 +476,7 @@ export class EvolutionApiService {
             headers: {
               'apikey': this.getApiKey(instanceApiKey),
             },
+            timeout: 15000,
           },
         ),
       );
@@ -405,6 +504,7 @@ export class EvolutionApiService {
               'apikey': this.getApiKey(instanceApiKey),
               'Content-Type': 'application/json',
             },
+            timeout: 15000,
           },
         ),
       );
@@ -412,47 +512,6 @@ export class EvolutionApiService {
       return response.data;
     } catch (error) {
       this.logger.error(`Error checking number: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Enviar mensaje con media (imagen, video, etc)
-   */
-  async sendMediaMessage(
-    instanceName: string, 
-    to: string, 
-    mediaUrl: string, 
-    mediaType: 'image' | 'video' | 'audio' | 'document',
-    caption?: string,
-    instanceApiKey?: string
-  ) {
-    try {
-      const formattedNumber = to.includes('@') ? to : `${to}@s.whatsapp.net`;
-      const endpoint = `${this.apiUrl}/message/send${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)}/${instanceName}`;
-
-      const response = await firstValueFrom(
-        this.httpService.post(
-          endpoint,
-          {
-            number: formattedNumber,
-            mediaUrl: mediaUrl,
-            caption: caption,
-            delay: 1200,
-          },
-          {
-            headers: {
-              'apikey': this.getApiKey(instanceApiKey),
-              'Content-Type': 'application/json',
-            },
-          },
-        ),
-      );
-
-      this.logger.log(`${mediaType} message sent to ${to} via instance ${instanceName}`);
-      return response.data;
-    } catch (error) {
-      this.logger.error(`Error sending ${mediaType} message: ${error.message}`);
       throw error;
     }
   }
@@ -469,6 +528,7 @@ export class EvolutionApiService {
             headers: {
               'apikey': this.getApiKey(instanceApiKey),
             },
+            timeout: 20000, // Mayor timeout para chats
           },
         ),
       );
@@ -497,6 +557,7 @@ export class EvolutionApiService {
               'apikey': this.getApiKey(instanceApiKey),
               'Content-Type': 'application/json',
             },
+            timeout: 20000,
           },
         ),
       );
