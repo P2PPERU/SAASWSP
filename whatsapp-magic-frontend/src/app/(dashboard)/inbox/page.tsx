@@ -1,4 +1,4 @@
-// src/app/(dashboard)/inbox/page.tsx
+// src/app/(dashboard)/inbox/page.tsx - ENHANCED VERSION
 "use client"
 
 import { useEffect, useState, useRef } from "react";
@@ -6,9 +6,12 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useWhatsAppStore } from "@/store/whatsapp.store";
 import { ChatList } from "@/components/whatsapp/ChatList";
 import { MessageBubble } from "@/components/whatsapp/MessageBubble";
+import { BulkMessageDialog } from "@/components/whatsapp/BulkMessageDialog";
+import { ScheduleMessageDialog } from "@/components/whatsapp/ScheduleMessageDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { 
   Send, 
   Loader2, 
@@ -16,11 +19,40 @@ import {
   Phone,
   MoreVertical,
   Search,
-  Filter
+  Filter,
+  Plus,
+  Paperclip,
+  Smile,
+  Clock,
+  Users,
+  Zap,
+  Image as ImageIcon,
+  File,
+  MapPin,
+  CheckCircle,
+  AlertCircle,
+  Settings
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/utils/cn";
 import toast from "react-hot-toast";
 
-export default function InboxPage() {
+// Quick reply templates
+const quickReplies = [
+  { id: 1, text: "¡Hola! ¿En qué puedo ayudarte?", emoji: "👋" },
+  { id: 2, text: "Gracias por contactarnos", emoji: "🙏" },
+  { id: 3, text: "Te responderé lo antes posible", emoji: "⏰" },
+  { id: 4, text: "¿Necesitas algo más?", emoji: "❓" },
+  { id: 5, text: "¡Que tengas un buen día!", emoji: "😊" },
+];
+
+export default function EnhancedInboxPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const instanceId = searchParams.get("instanceId");
@@ -42,7 +74,16 @@ export default function InboxPage() {
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(instanceId);
   const [messageText, setMessageText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"all" | "unread" | "active">("all");
+  const [isTyping, setIsTyping] = useState(false);
+  const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [showBulkDialog, setShowBulkDialog] = useState(false);
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [fileUpload, setFileUpload] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Cargar instancias si no están cargadas
   useEffect(() => {
@@ -70,6 +111,15 @@ export default function InboxPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Simular typing indicator
+  useEffect(() => {
+    if (messageText.length > 0) {
+      setIsTyping(true);
+      const timer = setTimeout(() => setIsTyping(false), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [messageText]);
+
   const handleSendMessage = async () => {
     if (!messageText.trim() || !selectedConversation || !selectedInstanceId) return;
 
@@ -79,15 +129,50 @@ export default function InboxPage() {
         text: messageText.trim(),
       });
       setMessageText("");
+      setShowQuickReplies(false);
     } catch (error) {
       // Error ya manejado en el store
     }
   };
 
-  const filteredConversations = conversations.filter(conv =>
-    conv.contactName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    conv.contactNumber.includes(searchQuery)
-  );
+  const handleQuickReply = (text: string) => {
+    setMessageText(text);
+    setShowQuickReplies(false);
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setFileUpload(file);
+      // Create preview for images
+      if (file.type.startsWith('image/')) {
+        const url = URL.createObjectURL(file);
+        setPreviewUrl(url);
+      }
+    }
+  };
+
+  const handleSendFile = async () => {
+    if (!fileUpload || !selectedConversation || !selectedInstanceId) return;
+
+    try {
+      // Here would be the file upload logic
+      toast.success(`Archivo ${fileUpload.name} enviado`);
+      setFileUpload(null);
+      setPreviewUrl(null);
+    } catch (error) {
+      toast.error("Error al enviar archivo");
+    }
+  };
+
+  const filteredConversations = conversations.filter(conv => {
+    const matchesSearch = conv.contactName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         conv.contactNumber.includes(searchQuery);
+    const matchesFilter = filterStatus === "all" || 
+                         (filterStatus === "unread" && conv.unreadCount > 0) ||
+                         (filterStatus === "active" && conv.status === "active");
+    return matchesSearch && matchesFilter;
+  });
 
   // Si no hay instancias
   if (!isLoading && instances.length === 0) {
@@ -118,7 +203,33 @@ export default function InboxPage() {
       <div className="w-80 bg-gray-900 border-r border-gray-800 flex flex-col">
         {/* Header */}
         <div className="p-4 border-b border-gray-800">
-          <h2 className="text-xl font-bold mb-4">Conversaciones</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold">Conversaciones</h2>
+            
+            {/* Actions Menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <Plus className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setShowBulkDialog(true)}>
+                  <Users className="mr-2 h-4 w-4" />
+                  Mensajes Masivos
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowScheduleDialog(true)}>
+                  <Clock className="mr-2 h-4 w-4" />
+                  Programar Mensaje
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>
+                  <Settings className="mr-2 h-4 w-4" />
+                  Configuración
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
           
           {/* Instance Selector */}
           <select
@@ -137,7 +248,7 @@ export default function InboxPage() {
           </select>
 
           {/* Search */}
-          <div className="relative">
+          <div className="relative mb-3">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
               placeholder="Buscar conversación..."
@@ -145,6 +256,23 @@ export default function InboxPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10 bg-gray-800 border-gray-700"
             />
+          </div>
+
+          {/* Filters */}
+          <div className="flex gap-2">
+            {(['all', 'unread', 'active'] as const).map((filter) => (
+              <Button
+                key={filter}
+                variant={filterStatus === filter ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setFilterStatus(filter)}
+                className="text-xs"
+              >
+                {filter === 'all' && 'Todas'}
+                {filter === 'unread' && 'Sin leer'}
+                {filter === 'active' && 'Activas'}
+              </Button>
+            ))}
           </div>
         </div>
 
@@ -177,13 +305,48 @@ export default function InboxPage() {
                 </div>
                 <div>
                   <h3 className="font-semibold">{selectedConversation.contactName}</h3>
-                  <p className="text-xs text-gray-400">{selectedConversation.contactNumber}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-gray-400">{selectedConversation.contactNumber}</p>
+                    {selectedConversation.unreadCount > 0 && (
+                      <Badge variant="connected" className="text-xs">
+                        {selectedConversation.unreadCount} sin leer
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
               
-              <Button variant="ghost" size="icon">
-                <MoreVertical className="w-5 h-5" />
-              </Button>
+              <div className="flex items-center gap-2">
+                {isTyping && (
+                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+                    <span>Escribiendo...</span>
+                  </div>
+                )}
+                
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon">
+                      <MoreVertical className="w-5 h-5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem>
+                      <Users className="mr-2 h-4 w-4" />
+                      Ver perfil
+                    </DropdownMenuItem>
+                    <DropdownMenuItem>
+                      <Zap className="mr-2 h-4 w-4" />
+                      Activar IA
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="text-red-400">
+                      <AlertCircle className="mr-2 h-4 w-4" />
+                      Bloquear contacto
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
 
             {/* Messages Area */}
@@ -202,17 +365,108 @@ export default function InboxPage() {
               )}
             </div>
 
+            {/* File Preview */}
+            {fileUpload && (
+              <div className="bg-gray-900 border-t border-gray-800 p-4">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <File className="w-5 h-5 text-gray-400" />
+                    <span className="text-sm">{fileUpload.name}</span>
+                  </div>
+                  <Button size="sm" onClick={handleSendFile}>
+                    Enviar
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    onClick={() => {
+                      setFileUpload(null);
+                      setPreviewUrl(null);
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+                {previewUrl && (
+                  <div className="mt-2">
+                    <img src={previewUrl} alt="Preview" className="max-w-48 max-h-48 rounded" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Quick Replies Panel */}
+            {showQuickReplies && (
+              <div className="bg-gray-900 border-t border-gray-800 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Zap className="w-4 h-4 text-purple-400" />
+                  <span className="text-sm font-medium text-purple-400">Respuestas Rápidas</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {quickReplies.map((reply) => (
+                    <Button
+                      key={reply.id}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleQuickReply(reply.text)}
+                      className="text-xs"
+                    >
+                      {reply.emoji} {reply.text}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Message Input */}
             <div className="bg-gray-900 border-t border-gray-800 p-4">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Escribe un mensaje..."
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && !e.shiftKey && handleSendMessage()}
-                  className="flex-1 bg-gray-800 border-gray-700"
-                  disabled={isSendingMessage}
-                />
+              <div className="flex items-end gap-2">
+                {/* Actions */}
+                <div className="flex gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Paperclip className="w-5 h-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setShowQuickReplies(!showQuickReplies)}
+                    className={cn(
+                      showQuickReplies && "bg-purple-500/20 text-purple-400"
+                    )}
+                  >
+                    <Zap className="w-5 h-5" />
+                  </Button>
+                </div>
+
+                {/* Input */}
+                <div className="flex-1 relative">
+                  <Input
+                    placeholder="Escribe un mensaje..."
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                    className="bg-gray-800 border-gray-700 pr-10"
+                    disabled={isSendingMessage}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2"
+                  >
+                    <Smile className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                {/* Send Button */}
                 <Button
                   variant="gradient"
                   size="icon"
@@ -227,6 +481,15 @@ export default function InboxPage() {
                 </Button>
               </div>
             </div>
+
+            {/* Hidden File Input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center">
@@ -240,6 +503,23 @@ export default function InboxPage() {
           </div>
         )}
       </div>
+
+      {/* Dialogs */}
+      {selectedInstanceId && (
+        <>
+          <BulkMessageDialog
+            instance={instances.find(i => i.id === selectedInstanceId)!}
+            open={showBulkDialog}
+            onOpenChange={setShowBulkDialog}
+          />
+          <ScheduleMessageDialog
+            instance={instances.find(i => i.id === selectedInstanceId)!}
+            open={showScheduleDialog}
+            onOpenChange={setShowScheduleDialog}
+            initialRecipient={selectedConversation?.contactNumber}
+          />
+        </>
+      )}
     </div>
   );
 }

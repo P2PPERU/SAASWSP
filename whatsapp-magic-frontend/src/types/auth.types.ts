@@ -1,16 +1,14 @@
 // src/types/auth.types.ts
+
+import type { Tenant } from '@/services/tenant.service'
+
 export interface User {
   id: string;
   email: string;
   name: string;
   role: 'admin' | 'user';
   tenantId: string;
-  tenant?: {
-    id: string;
-    name: string;
-    plan: 'basic' | 'pro' | 'enterprise';
-    status: 'active' | 'inactive' | 'suspended';
-  };
+  tenant?: Tenant;           // <-- Aquí el cambio para usar toda la estructura (incluye limits, settings, etc)
   createdAt?: string;
 }
 
