@@ -1,3 +1,4 @@
+// src/modules/whatsapp/services/evolution-api.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
@@ -14,18 +15,26 @@ import {
 export class EvolutionApiService {
   private readonly logger = new Logger(EvolutionApiService.name);
   private readonly apiUrl: string;
-  private readonly apiKey: string;
+  private readonly globalApiKey: string;
 
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {
     this.apiUrl = this.configService.get<string>('EVOLUTION_API_URL', 'http://localhost:8080');
-    this.apiKey = this.configService.get<string>('EVOLUTION_API_KEY', 'B6D711FCDE4D4FD5936544120E713976');
+    this.globalApiKey = this.configService.get<string>('EVOLUTION_API_KEY', 'B6D711FCDE4D4FD5936544120E713976');
+  }
+
+  /**
+   * Obtener la API Key a usar (específica de instancia o global)
+   */
+  private getApiKey(instanceApiKey?: string): string {
+    return instanceApiKey || this.globalApiKey;
   }
 
   /**
    * Crear una nueva instancia de WhatsApp
+   * NOTA: Para crear instancias siempre usa la API Key global
    */
   async createInstance(instanceName: string, tenantId: string): Promise<CreateInstanceResponse> {
     try {
@@ -56,7 +65,7 @@ export class EvolutionApiService {
           },
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.globalApiKey, // Usar API Key global para crear
               'Content-Type': 'application/json',
             },
           },
@@ -64,6 +73,10 @@ export class EvolutionApiService {
       );
 
       this.logger.log(`Instance created successfully: ${instanceName}`);
+      
+      // CAMBIO: Log del hash directamente (es un string)
+      this.logger.log(`Instance API Key (hash): ${response.data.hash}`);
+      
       return response.data;
     } catch (error) {
       this.logger.error(`Error creating instance: ${error.message}`);
@@ -78,14 +91,14 @@ export class EvolutionApiService {
   /**
    * Obtener todas las instancias
    */
-  async fetchInstances() {
+  async fetchInstances(instanceApiKey?: string): Promise<any[]> {
     try {
       const response = await firstValueFrom(
         this.httpService.get(
           `${this.apiUrl}/instance/fetchInstances`,
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.getApiKey(instanceApiKey),
             },
           },
         ),
@@ -101,14 +114,19 @@ export class EvolutionApiService {
   /**
    * Obtener el estado de conexión de una instancia
    */
-  async getInstanceStatus(instanceName: string): Promise<ConnectionStateResponse> {
+  async getInstanceStatus(instanceName: string, instanceApiKey?: string): Promise<ConnectionStateResponse> {
     try {
+      const apiKeyToUse = this.getApiKey(instanceApiKey);
+      
+      // Log para debugging
+      this.logger.debug(`🔑 Getting status for ${instanceName} with API Key: ${apiKeyToUse?.substring(0, 10)}...`);
+      
       const response = await firstValueFrom(
         this.httpService.get<ConnectionStateResponse>(
           `${this.apiUrl}/instance/connectionState/${instanceName}`,
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': apiKeyToUse,
             },
           },
         ),
@@ -117,6 +135,13 @@ export class EvolutionApiService {
       return response.data;
     } catch (error) {
       this.logger.error(`Error getting instance status: ${error.message}`);
+      
+      // Más detalles del error si es 401
+      if (error.response?.status === 401) {
+        this.logger.error(`❌ API Key inválida o instancia no existe: ${instanceName}`);
+        this.logger.error(`API Key usada: ${this.getApiKey(instanceApiKey)?.substring(0, 10)}...`);
+      }
+      
       throw error;
     }
   }
@@ -124,14 +149,14 @@ export class EvolutionApiService {
   /**
    * Conectar una instancia (generar QR Code)
    */
-  async connectInstance(instanceName: string) {
+  async connectInstance(instanceName: string, instanceApiKey?: string) {
     try {
       const response = await firstValueFrom(
         this.httpService.get(
           `${this.apiUrl}/instance/connect/${instanceName}`,
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.getApiKey(instanceApiKey),
             },
           },
         ),
@@ -148,9 +173,9 @@ export class EvolutionApiService {
   /**
    * Obtener el código QR actual
    */
-  async getQRCode(instanceName: string) {
+  async getQRCode(instanceName: string, instanceApiKey?: string) {
     try {
-      const connectionState = await this.getInstanceStatus(instanceName);
+      const connectionState = await this.getInstanceStatus(instanceName, instanceApiKey);
       
       // Solo 'open' significa conectado completamente
       if (connectionState.instance?.state === 'open') {
@@ -158,7 +183,7 @@ export class EvolutionApiService {
       }
       
       // Para 'connecting' o 'close', necesitamos obtener el QR
-      const connectResponse = await this.connectInstance(instanceName);
+      const connectResponse = await this.connectInstance(instanceName, instanceApiKey);
       return {
         connected: false,
         qrcode: connectResponse.qr || connectResponse.base64 || connectResponse.code
@@ -172,14 +197,14 @@ export class EvolutionApiService {
   /**
    * Desconectar una instancia
    */
-  async disconnectInstance(instanceName: string) {
+  async disconnectInstance(instanceName: string, instanceApiKey?: string) {
     try {
       const response = await firstValueFrom(
         this.httpService.delete(
           `${this.apiUrl}/instance/logout/${instanceName}`,
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.getApiKey(instanceApiKey),
             },
           },
         ),
@@ -196,14 +221,14 @@ export class EvolutionApiService {
   /**
    * Eliminar una instancia
    */
-  async deleteInstance(instanceName: string) {
+  async deleteInstance(instanceName: string, instanceApiKey?: string) {
     try {
       const response = await firstValueFrom(
         this.httpService.delete(
           `${this.apiUrl}/instance/delete/${instanceName}`,
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.getApiKey(instanceApiKey),
             },
           },
         ),
@@ -220,7 +245,7 @@ export class EvolutionApiService {
   /**
    * Enviar un mensaje de texto
    */
-  async sendTextMessage(instanceName: string, to: string, text: string): Promise<SendMessageResponse> {
+  async sendTextMessage(instanceName: string, to: string, text: string, instanceApiKey?: string): Promise<SendMessageResponse> {
     try {
       // Asegurar que el número tenga el formato correcto
       const formattedNumber = to.includes('@') ? to : `${to}@s.whatsapp.net`;
@@ -235,7 +260,7 @@ export class EvolutionApiService {
           },
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.getApiKey(instanceApiKey),
               'Content-Type': 'application/json',
             },
           },
@@ -256,7 +281,7 @@ export class EvolutionApiService {
   /**
    * Configurar webhook para recibir eventos
    */
-  async setWebhook(instanceName: string, webhookUrl: string) {
+  async setWebhook(instanceName: string, webhookUrl: string, instanceApiKey?: string) {
     try {
       const response = await firstValueFrom(
         this.httpService.post(
@@ -285,7 +310,7 @@ export class EvolutionApiService {
           },
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.getApiKey(instanceApiKey),
               'Content-Type': 'application/json',
             },
           },
@@ -303,10 +328,13 @@ export class EvolutionApiService {
   /**
    * Buscar instancia por nombre
    */
-  async findInstance(instanceName: string) {
+  async findInstance(instanceName: string, instanceApiKey?: string) {
     try {
-      const instances = await this.fetchInstances();
-      return instances.find((inst: any) => inst.instance.instanceName === instanceName);
+      const instances = await this.fetchInstances(instanceApiKey);
+      return instances.find((inst: any) => 
+        inst.instance?.instanceName === instanceName || 
+        inst.instanceName === instanceName
+      );
     } catch (error) {
       this.logger.error(`Error finding instance: ${error.message}`);
       throw error;
@@ -316,7 +344,7 @@ export class EvolutionApiService {
   /**
    * Reiniciar una instancia
    */
-  async restartInstance(instanceName: string) {
+  async restartInstance(instanceName: string, instanceApiKey?: string) {
     try {
       const response = await firstValueFrom(
         this.httpService.put(
@@ -324,7 +352,7 @@ export class EvolutionApiService {
           {},
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.getApiKey(instanceApiKey),
             },
           },
         ),
@@ -341,14 +369,14 @@ export class EvolutionApiService {
   /**
    * Obtener información del perfil
    */
-  async getProfileInfo(instanceName: string) {
+  async getProfileInfo(instanceName: string, instanceApiKey?: string) {
     try {
       const response = await firstValueFrom(
         this.httpService.get(
           `${this.apiUrl}/chat/fetchProfile/${instanceName}`,
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.getApiKey(instanceApiKey),
             },
           },
         ),
@@ -364,7 +392,7 @@ export class EvolutionApiService {
   /**
    * Verificar si un número está en WhatsApp
    */
-  async checkNumberExists(instanceName: string, number: string) {
+  async checkNumberExists(instanceName: string, number: string, instanceApiKey?: string) {
     try {
       const response = await firstValueFrom(
         this.httpService.post(
@@ -374,7 +402,7 @@ export class EvolutionApiService {
           },
           {
             headers: {
-              'apikey': this.apiKey,
+              'apikey': this.getApiKey(instanceApiKey),
               'Content-Type': 'application/json',
             },
           },
@@ -384,6 +412,98 @@ export class EvolutionApiService {
       return response.data;
     } catch (error) {
       this.logger.error(`Error checking number: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Enviar mensaje con media (imagen, video, etc)
+   */
+  async sendMediaMessage(
+    instanceName: string, 
+    to: string, 
+    mediaUrl: string, 
+    mediaType: 'image' | 'video' | 'audio' | 'document',
+    caption?: string,
+    instanceApiKey?: string
+  ) {
+    try {
+      const formattedNumber = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+      const endpoint = `${this.apiUrl}/message/send${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)}/${instanceName}`;
+
+      const response = await firstValueFrom(
+        this.httpService.post(
+          endpoint,
+          {
+            number: formattedNumber,
+            mediaUrl: mediaUrl,
+            caption: caption,
+            delay: 1200,
+          },
+          {
+            headers: {
+              'apikey': this.getApiKey(instanceApiKey),
+              'Content-Type': 'application/json',
+            },
+          },
+        ),
+      );
+
+      this.logger.log(`${mediaType} message sent to ${to} via instance ${instanceName}`);
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Error sending ${mediaType} message: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Obtener chats/conversaciones
+   */
+  async fetchChats(instanceName: string, instanceApiKey?: string) {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(
+          `${this.apiUrl}/chat/fetchAllChats/${instanceName}`,
+          {
+            headers: {
+              'apikey': this.getApiKey(instanceApiKey),
+            },
+          },
+        ),
+      );
+
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Error fetching chats: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Obtener mensajes de un chat
+   */
+  async fetchMessages(instanceName: string, remoteJid: string, limit: number = 50, instanceApiKey?: string) {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${this.apiUrl}/chat/fetchMessages/${instanceName}`,
+          {
+            remoteJid: remoteJid,
+            limit: limit,
+          },
+          {
+            headers: {
+              'apikey': this.getApiKey(instanceApiKey),
+              'Content-Type': 'application/json',
+            },
+          },
+        ),
+      );
+
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Error fetching messages: ${error.message}`);
       throw error;
     }
   }

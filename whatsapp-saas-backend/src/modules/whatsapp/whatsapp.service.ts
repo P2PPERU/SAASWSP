@@ -63,15 +63,21 @@ export class WhatsAppService {
     try {
       // Crear instancia en Evolution API
       const evolutionInstance = await this.evolutionApiService.createInstance(
-        instanceKey,
-        tenantId,
+      instanceKey,
+      tenantId,
       );
 
-      // Guardar en base de datos
+      // ⬇️ CAMBIO IMPORTANTE: El API Key está en 'hash' directamente ⬇️
+      const apiKey = evolutionInstance.hash;
+      
+      this.logger.log(`API Key recibida: ${apiKey}`);
+
+      // ⬇️ IMPORTANTE: Guardar la API Key única de la instancia ⬇️
       const instance = this.instanceRepository.create({
         ...createInstanceDto,
         tenantId,
         instanceKey,
+        apiKey: apiKey, // <-- USAR LA VARIABLE apiKey
         status: InstanceStatus.DISCONNECTED,
         settings: {
           ...createInstanceDto.settings,
@@ -80,11 +86,17 @@ export class WhatsAppService {
       });
 
       const savedInstance = await this.instanceRepository.save(instance);
+      
+      this.logger.log(`Instancia creada con API Key única: ${savedInstance.apiKey?.substring(0, 10)}...`);
 
       // Configurar webhook
       try {
         const webhookUrl = `${this.configService.get('BACKEND_URL')}/api/v1/whatsapp/webhook/${savedInstance.id}`;
-        await this.evolutionApiService.setWebhook(instanceKey, webhookUrl);
+        await this.evolutionApiService.setWebhook(
+          instanceKey, 
+          webhookUrl,
+          savedInstance.apiKey // <-- USAR LA API KEY ESPECÍFICA
+        );
         this.logger.log(`Webhook configured for instance ${savedInstance.id} at ${webhookUrl}`);
       } catch (webhookError) {
         this.logger.warn(`Could not configure webhook: ${webhookError.message}`);
@@ -142,7 +154,10 @@ export class WhatsAppService {
 
     // Obtener estado actualizado de Evolution API
     try {
-      const status = await this.evolutionApiService.getInstanceStatus(instance.instanceKey);
+      const status = await this.evolutionApiService.getInstanceStatus(
+        instance.instanceKey,
+        instance.apiKey // <-- PASAR LA API KEY ESPECÍFICA
+      );
       
       // Actualizar estado si cambió
       if (status.instance?.state) {
@@ -178,7 +193,10 @@ export class WhatsAppService {
 
     try {
       // Primero verificar el estado actual
-      const status = await this.evolutionApiService.getInstanceStatus(instance.data.instanceKey);
+      const status = await this.evolutionApiService.getInstanceStatus(
+        instance.data.instanceKey,
+        instance.data.apiKey // <-- PASAR LA API KEY ESPECÍFICA
+      );
       
       // Evolution v2 retorna: { instance: { state: 'open'|'close' } }
       if (status.instance?.state === 'open') {
@@ -198,7 +216,10 @@ export class WhatsAppService {
       }
 
       // Si no está conectado, generar QR
-      const qrData = await this.evolutionApiService.connectInstance(instance.data.instanceKey);
+      const qrData = await this.evolutionApiService.connectInstance(
+        instance.data.instanceKey,
+        instance.data.apiKey // <-- PASAR LA API KEY ESPECÍFICA
+      );
 
       // Evolution v2 retorna el QR en diferentes formatos
       if (qrData.code || qrData.base64 || qrData.qr) {
@@ -233,6 +254,7 @@ export class WhatsAppService {
       throw new BadRequestException(`Error al conectar la instancia: ${error.message}`);
     }
   }
+
   /**
    * Obtener estado de conexión en tiempo real
    */
@@ -241,7 +263,10 @@ export class WhatsAppService {
 
     try {
       // Obtener estado actual de Evolution API
-      const status = await this.evolutionApiService.getInstanceStatus(instance.data.instanceKey);
+      const status = await this.evolutionApiService.getInstanceStatus(
+        instance.data.instanceKey,
+        instance.data.apiKey // <-- PASAR LA API KEY ESPECÍFICA
+      );
       
       this.logger.log(`Estado de conexión para ${instance.data.name}: ${JSON.stringify(status)}`);
       
@@ -313,6 +338,7 @@ export class WhatsAppService {
       };
     }
   }
+
   /**
    * Desconectar una instancia
    */
@@ -320,7 +346,10 @@ export class WhatsAppService {
     const instance = await this.getInstance(tenantId, instanceId);
 
     try {
-      await this.evolutionApiService.disconnectInstance(instance.data.instanceKey);
+      await this.evolutionApiService.disconnectInstance(
+        instance.data.instanceKey,
+        instance.data.apiKey // <-- PASAR LA API KEY ESPECÍFICA
+      );
 
       instance.data.status = InstanceStatus.DISCONNECTED;
       instance.data.qrCode = null;
@@ -344,7 +373,10 @@ export class WhatsAppService {
 
     try {
       // Eliminar de Evolution API
-      await this.evolutionApiService.deleteInstance(instance.data.instanceKey);
+      await this.evolutionApiService.deleteInstance(
+        instance.data.instanceKey,
+        instance.data.apiKey // <-- PASAR LA API KEY ESPECÍFICA
+      );
     } catch (error) {
       this.logger.warn(`Could not delete from Evolution API: ${error.message}`);
       // Continuar con la eliminación local
@@ -616,10 +648,7 @@ export class WhatsAppService {
   }
 
   /**
-   * Manejar nuevo mensaje
-   */
-  /**
-   * Manejar nuevo mensaje - VERSIÓN CON IA
+   * Manejar nuevo mensaje - CON IA
    */
   private async handleNewMessage(instance: WhatsAppInstance, data: any) {
     // Evolution v2 estructura del mensaje
@@ -632,17 +661,16 @@ export class WhatsAppService {
         // IMPORTANTE: Solo procesar mensajes ENTRANTES (no fromMe)
         if (key.fromMe) {
           this.logger.log(`Ignorando mensaje saliente: ${key.id}`);
-          continue; // <-- ESTO ES CRÍTICO
+          continue;
         }
 
         const contactNumber = key.remoteJid.replace('@s.whatsapp.net', '').replace('@g.us', '');
             
-        // ⬇️ AGREGAR AQUÍ EL NUEVO FILTRO ⬇️
+        // Ignorar mensajes de grupos
         if (key.remoteJid.includes('@g.us') || contactNumber.includes('-')) {
           this.logger.log('Ignorando mensaje de grupo');
           continue;
         }
-        // ⬆️ FIN DEL NUEVO CÓDIGO ⬆️
 
         // Buscar o crear conversación
         let conversation = await this.conversationRepository.findOne({
@@ -787,8 +815,8 @@ export class WhatsAppService {
                       generatedByAI: true,
                       model: 'gpt-3.5-turbo',
                       timestamp: new Date().toISOString(),
-                      originalMessage: messageText, // Guardar mensaje original
-                      responseToMessageId: newMessage.id, // Referencia al mensaje que responde
+                      originalMessage: messageText,
+                      responseToMessageId: newMessage.id,
                     },
                   });
 

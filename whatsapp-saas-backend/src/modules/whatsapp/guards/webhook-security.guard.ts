@@ -2,16 +2,23 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { WhatsAppInstance } from '../../../database/entities';
 
 @Injectable()
 export class WebhookSecurityGuard implements CanActivate {
   private readonly logger = new Logger(WebhookSecurityGuard.name);
-  private readonly evolutionApiKey: string;
+  private readonly globalApiKey: string;
   private readonly webhookSecret: string;
   private readonly allowedIPs: string[];
 
-  constructor(private configService: ConfigService) {
-    this.evolutionApiKey = this.configService.get<string>('EVOLUTION_API_KEY', '');
+  constructor(
+    private configService: ConfigService,
+    @InjectRepository(WhatsAppInstance)
+    private instanceRepository: Repository<WhatsAppInstance>,
+  ) {
+    this.globalApiKey = this.configService.get<string>('EVOLUTION_API_KEY', '');
     this.webhookSecret = this.configService.get<string>('WEBHOOK_SECRET', '');
     
     // IPs permitidas (localhost, docker, tu IP local)
@@ -19,7 +26,7 @@ export class WebhookSecurityGuard implements CanActivate {
     this.allowedIPs = configuredIPs.split(',').map(ip => ip.trim());
   }
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
     
     // 1. Validar IP de origen (opcional pero recomendado)
@@ -31,33 +38,69 @@ export class WebhookSecurityGuard implements CanActivate {
 
     // 2. Validar API Key en el body del webhook
     const webhookData = request.body;
-    if (!webhookData || !webhookData.apikey) {
+    
+    // Si no hay datos, rechazar
+    if (!webhookData) {
+      this.logger.warn('Webhook rechazado - Sin body');
+      throw new UnauthorizedException('Missing webhook data');
+    }
+
+    // Evolution v2 envía el API key en el body
+    const providedApiKey = webhookData.apikey;
+    if (!providedApiKey) {
       this.logger.warn('Webhook rechazado - Sin API key en el body');
       throw new UnauthorizedException('Missing API key');
     }
 
-    // Evolution envía el API key en el body del webhook
-    if (webhookData.apikey !== this.evolutionApiKey) {
-      this.logger.warn(`Webhook rechazado - API key inválida: ${webhookData.apikey}`);
-      throw new UnauthorizedException('Invalid API key');
-    }
+    // 3. Verificar contra la API Key de la instancia específica
+    // Obtener el instanceName del webhook
+    const instanceName = webhookData.instance;
+    
+    if (instanceName) {
+      try {
+        // Buscar la instancia por instanceKey
+        const instance = await this.instanceRepository.findOne({
+          where: { instanceKey: instanceName }
+        });
 
-    // 3. Validar token secreto adicional (si está configurado)
-    if (this.webhookSecret) {
-      const providedSecret = request.headers['x-webhook-secret'] as string;
-      if (providedSecret !== this.webhookSecret) {
-        this.logger.warn('Webhook rechazado - Token secreto inválido');
-        throw new UnauthorizedException('Invalid webhook secret');
+        if (instance && instance.apiKey) {
+          // Validar contra la API Key específica de la instancia
+          if (providedApiKey !== instance.apiKey) {
+            this.logger.warn(`Webhook rechazado - API key inválida para instancia ${instanceName}`);
+            throw new UnauthorizedException('Invalid instance API key');
+          }
+          
+          this.logger.debug(`✅ Webhook autorizado con API Key de instancia ${instance.name}`);
+          return true;
+        }
+      } catch (error) {
+        this.logger.error(`Error verificando instancia: ${error.message}`);
       }
     }
 
-    // 4. Validar que el webhook viene de Evolution (por server_url)
+    // 4. Si no se encontró la instancia, validar contra la API Key global
+    // Esto puede pasar con webhooks de sistema o instancias nuevas
+    if (providedApiKey === this.globalApiKey) {
+      this.logger.debug('✅ Webhook autorizado con API Key global');
+      return true;
+    }
+
+    // 5. Validar token secreto adicional (si está configurado)
+    if (this.webhookSecret) {
+      const providedSecret = request.headers['x-webhook-secret'] as string;
+      if (providedSecret === this.webhookSecret) {
+        this.logger.debug('✅ Webhook autorizado con token secreto');
+        return true;
+      }
+    }
+
+    // 6. Validar que el webhook viene de Evolution (por server_url)
     if (webhookData.server_url) {
       const allowedUrls = [
         'http://localhost:8080',
         'http://evolution-api:8080',
         this.configService.get('EVOLUTION_API_URL')
-      ];
+      ].filter(Boolean);
       
       if (!allowedUrls.includes(webhookData.server_url)) {
         this.logger.warn(`Webhook rechazado - server_url no autorizado: ${webhookData.server_url}`);
@@ -65,8 +108,9 @@ export class WebhookSecurityGuard implements CanActivate {
       }
     }
 
-    this.logger.debug(`Webhook autorizado desde IP: ${clientIP}`);
-    return true;
+    // Si llegamos aquí, el webhook no está autorizado
+    this.logger.warn('Webhook rechazado - No pasó ninguna validación de seguridad');
+    throw new UnauthorizedException('Webhook not authorized');
   }
 
   private getClientIP(request: Request): string {
@@ -102,7 +146,9 @@ export class WebhookSecurityGuard implements CanActivate {
         return regex.test(normalizedIP);
       }
       
-      return normalizedIP === allowedIP || clientIP === allowedIP;
+      return normalizedIP === allowedIP || 
+             clientIP === allowedIP || 
+             allowedIP === 'localhost' && (normalizedIP === '127.0.0.1' || normalizedIP === '::1');
     });
   }
 }

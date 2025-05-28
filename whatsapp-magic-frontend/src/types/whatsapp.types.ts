@@ -42,6 +42,7 @@ export interface WhatsAppInstance {
   tenantId: string;
   name: string;
   instanceKey: string;
+  apiKey?: string; // <-- NUEVO: API Key única de la instancia
   phoneNumber?: string;
   status: InstanceStatus;
   qrCode?: string;
@@ -86,6 +87,7 @@ export interface Message {
     timestamp?: string;
     originalMessage?: string;
     responseToMessageId?: string;
+    apiKeyUsed?: string; // <-- NUEVO: Para debugging
   };
   createdAt: string;
   updatedAt?: string;
@@ -131,6 +133,7 @@ export interface ConnectionStatusResponse {
   profilePictureUrl?: string;
   lastConnectionAt?: Date | string;
   qrCode?: string;
+  hasApiKey?: boolean; // <-- NUEVO: Indicador de API Key
   evolutionStatus?: any;
   error?: string;
 }

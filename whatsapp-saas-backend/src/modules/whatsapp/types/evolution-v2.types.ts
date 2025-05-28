@@ -8,15 +8,19 @@
 export interface CreateInstanceResponse {
   instance: {
     instanceName: string;
+    instanceId: string;
     status: string;
+    integration: string;
   };
-  hash: {
-    apikey: string;
-  };
+  hash: string; // <-- CAMBIO: Ahora es string directo, no un objeto
   qrcode: {
-    code: string;
-    base64: string;
+    count: number;
+    code?: string;
+    base64?: string;
   };
+  webhook?: any;
+  websocket?: any;
+  settings?: any;
 }
 
 // Estado de conexión
@@ -197,8 +201,8 @@ export interface WebhookConfig {
   };
 }
 
-// Respuesta de lista de instancias
-export interface FetchInstancesResponse {
+// Respuesta de lista de instancias - CAMBIO: Tipo correcto
+export type FetchInstancesResponse = Array<{
   instance: {
     instanceName: string;
     instanceId: string;
@@ -210,4 +214,19 @@ export interface FetchInstancesResponse {
     profilePictureUrl?: string;
     connectionStatus: 'open' | 'close' | 'connecting';
   };
-}[]
+}>;
+
+// O alternativamente, si prefieres interface:
+export interface InstanceInfo {
+  instance: {
+    instanceName: string;
+    instanceId: string;
+    status: string;
+    serverUrl: string;
+    apikey?: string;
+    owner?: string;
+    profileName?: string;
+    profilePictureUrl?: string;
+    connectionStatus: 'open' | 'close' | 'connecting';
+  };
+}

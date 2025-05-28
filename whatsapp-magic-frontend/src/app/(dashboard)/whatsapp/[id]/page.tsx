@@ -7,7 +7,7 @@ import { useWhatsAppStore } from "@/store/whatsapp.store";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ConnectionStatus } from "@/components/whatsapp/ConnectionStatus";
-import { Loader2, CheckCircle, RefreshCw, ArrowLeft, MessageSquare } from "lucide-react";
+import { Loader2, CheckCircle, RefreshCw, ArrowLeft, MessageSquare, Key, AlertTriangle } from "lucide-react";
 import Image from "next/image";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -29,6 +29,7 @@ export default function WhatsAppInstanceDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const instance = instances.find(inst => inst.id === instanceId);
+  const hasApiKey = !!instance?.apiKey;
 
   useEffect(() => {
     if (instances.length === 0) {
@@ -72,11 +73,20 @@ export default function WhatsAppInstanceDetailPage() {
   }, [instanceId, instance, checkConnectionStatus, connectionStatus?.connected]);
 
   const handleRetryConnection = async () => {
+    console.log('🔄 Intentando generar QR...');
+    if (!hasApiKey) {
+      setError("No se puede conectar: La instancia no tiene API Key configurada");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     try {
+      console.log('📞 Llamando a connectInstance...');
       await connectInstance(instanceId);
+      console.log('✅ connectInstance completado');
     } catch (error) {
+      console.error('❌ Error en connectInstance:', error);
       setError("Error al generar código QR");
     }
     setIsLoading(false);
@@ -121,6 +131,21 @@ export default function WhatsAppInstanceDetailPage() {
         <ConnectionStatus status={connectionStatus?.status || instance.status} />
       </div>
 
+      {/* API Key Warning - Custom Alert */}
+      {!hasApiKey && (
+        <div className="mb-6 rounded-lg border border-yellow-800 bg-yellow-900/20 p-4">
+          <div className="flex">
+            <AlertTriangle className="h-5 w-5 text-yellow-600" />
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-yellow-600">Sin API Key configurada</h3>
+              <p className="mt-1 text-sm text-yellow-500">
+                Esta instancia no tiene una API Key configurada. Puede que necesites recrear la instancia.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
       <div className="grid gap-6">
         {/* Connection Card */}
@@ -130,7 +155,9 @@ export default function WhatsAppInstanceDetailPage() {
             <CardDescription>
               {connectionStatus?.connected 
                 ? "Tu WhatsApp está conectado y listo para usar"
-                : "Escanea el código QR para conectar tu WhatsApp"
+                : hasApiKey 
+                  ? "Escanea el código QR para conectar tu WhatsApp"
+                  : "No se puede conectar sin API Key"
               }
             </CardDescription>
           </CardHeader>
@@ -175,7 +202,7 @@ export default function WhatsAppInstanceDetailPage() {
                   Ver Conversaciones
                 </Button>
               </div>
-            ) : connectionStatus?.qrCode ? (
+            ) : connectionStatus?.qrCode && hasApiKey ? (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-lg mx-auto max-w-sm">
                   {connectionStatus.qrCode.startsWith("data:image") ? (
@@ -215,10 +242,20 @@ export default function WhatsAppInstanceDetailPage() {
             ) : error ? (
               <div className="text-center py-12">
                 <p className="text-red-400 mb-4">{error}</p>
-                <Button onClick={handleRetryConnection} variant="outline">
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Reintentar
-                </Button>
+                {hasApiKey && (
+                  <Button onClick={handleRetryConnection} variant="outline">
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Reintentar
+                  </Button>
+                )}
+              </div>
+            ) : !hasApiKey ? (
+              <div className="text-center py-12">
+                <AlertTriangle className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
+                <p className="text-yellow-400 mb-4">No se puede conectar sin API Key</p>
+                <p className="text-sm text-gray-400 mb-4">
+                  Esta instancia necesita ser recreada para obtener una API Key válida.
+                </p>
               </div>
             ) : (
               <div className="text-center py-12">
@@ -253,6 +290,26 @@ export default function WhatsAppInstanceDetailPage() {
               <div>
                 <dt className="text-sm text-gray-400">Número</dt>
                 <dd>{connectionStatus?.phoneNumber || instance.phoneNumber || "No conectado"}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-gray-400">API Key</dt>
+                <dd className="flex items-center gap-2">
+                  {hasApiKey ? (
+                    <>
+                      <Key className="w-4 h-4 text-green-500" />
+                      <span className="font-mono text-sm">{instance.apiKey?.substring(0, 10)}...</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                      <span className="text-yellow-400">No configurada</span>
+                    </>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sm text-gray-400">Instance Key</dt>
+                <dd className="font-mono text-sm truncate">{instance.instanceKey}</dd>
               </div>
             </dl>
           </CardContent>

@@ -18,6 +18,10 @@ export class WhatsAppInstance extends BaseEntity {
   @Column({ unique: true })
   instanceKey: string;
 
+  // NUEVO: Guardar la API Key única de la instancia
+  @Column({ nullable: true })
+  apiKey: string;
+
   @Column({ nullable: true })
   phoneNumber: string;
 

@@ -71,6 +71,19 @@ export const useWhatsAppStore = create<WhatsAppState>((set, get) => ({
     try {
       const response = await whatsappService.getInstances();
       set({ instances: response.data, isLoading: false });
+      
+      // Verificar instancias sin API Key
+      const instancesWithoutApiKey = response.data.filter((inst: WhatsAppInstance) => !inst.apiKey);
+      if (instancesWithoutApiKey.length > 0) {
+        // Usar toast normal con icono de advertencia personalizado
+        toast(`⚠️ ${instancesWithoutApiKey.length} instancia(s) sin API Key configurada`, {
+          duration: 4000,
+          style: {
+            background: '#713200',
+            color: '#fff',
+          },
+        });
+      }
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || 'Error al cargar instancias';
       set({ error: errorMessage, isLoading: false });
@@ -90,6 +103,14 @@ export const useWhatsAppStore = create<WhatsAppState>((set, get) => ({
       }));
       
       toast.success('Instancia creada exitosamente');
+      
+      // Notificar sobre la API Key generada
+      if (newInstance.apiKey) {
+        toast.success(`API Key generada: ${newInstance.apiKey.substring(0, 10)}...`, {
+          duration: 5000,
+        });
+      }
+      
       return newInstance;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || 'Error al crear instancia';
@@ -101,6 +122,18 @@ export const useWhatsAppStore = create<WhatsAppState>((set, get) => ({
 
   selectInstance: (instance) => {
     set({ selectedInstance: instance });
+    
+    // Advertir si la instancia no tiene API Key
+    if (instance && !instance.apiKey) {
+      // Usar toast normal con icono de advertencia personalizado
+      toast('⚠️ Esta instancia no tiene API Key configurada', {
+        duration: 3000,
+        style: {
+          background: '#713200',
+          color: '#fff',
+        },
+      });
+    }
   },
 
   updateInstance: async (instanceId, data) => {
@@ -144,6 +177,12 @@ export const useWhatsAppStore = create<WhatsAppState>((set, get) => ({
   connectInstance: async (instanceId) => {
     set({ isConnecting: true, error: null });
     try {
+      // Verificar que la instancia tenga API Key
+      const instance = get().instances.find(inst => inst.id === instanceId);
+      if (!instance?.apiKey) {
+        throw new Error('La instancia no tiene API Key configurada');
+      }
+      
       const response = await whatsappService.connectInstance(instanceId);
       
       // Actualizar instancia con QR code
@@ -164,7 +203,7 @@ export const useWhatsAppStore = create<WhatsAppState>((set, get) => ({
         toast.success('WhatsApp conectado exitosamente');
       }
     } catch (error: any) {
-      const errorMessage = error.response?.data?.message || 'Error al conectar instancia';
+      const errorMessage = error.response?.data?.message || error.message || 'Error al conectar instancia';
       set({ error: errorMessage, isConnecting: false });
       toast.error(errorMessage);
     }
@@ -174,6 +213,10 @@ export const useWhatsAppStore = create<WhatsAppState>((set, get) => ({
     try {
       const response = await whatsappService.getConnectionStatus(instanceId);
       const status = response.data;
+      
+      // Verificar si tiene API Key
+      const instance = get().instances.find(i => i.id === instanceId);
+      status.hasApiKey = !!instance?.apiKey;
       
       // Actualizar estado de la instancia
       set((state) => ({

@@ -11,7 +11,9 @@ import {
   MessageSquare,
   MoreVertical,
   Plug,
-  Unplug
+  Unplug,
+  Key,
+  AlertCircle
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
@@ -44,12 +46,26 @@ export function InstanceCard({
   const router = useRouter();
   const isConnected = instance.status === InstanceStatus.CONNECTED;
   const canConnect = instance.status === InstanceStatus.DISCONNECTED || instance.status === InstanceStatus.FAILED;
+  const hasApiKey = !!instance.apiKey;
 
   return (
     <Card className="bg-gray-900/50 border-gray-800 hover:border-gray-700 transition-all">
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-4">
         <div className="space-y-1">
-          <h3 className="font-semibold text-lg">{instance.name}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-lg">{instance.name}</h3>
+            {hasApiKey ? (
+              <div className="flex items-center gap-1">
+                <Key className="w-4 h-4 text-green-500" />
+                <span className="text-xs text-green-500">API Key</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <AlertCircle className="w-4 h-4 text-yellow-500" />
+                <span className="text-xs text-yellow-500">Sin API Key</span>
+              </div>
+            )}
+          </div>
           {instance.phoneNumber && (
             <p className="text-sm text-gray-400 flex items-center gap-1">
               <Phone className="w-3 h-3" />
@@ -79,7 +95,7 @@ export function InstanceCard({
                     Desconectar
                   </DropdownMenuItem>
                 </>
-              ) : canConnect ? (
+              ) : canConnect && hasApiKey ? (
                 <DropdownMenuItem onClick={onConnect}>
                   <Plug className="mr-2 h-4 w-4" />
                   Conectar
@@ -124,6 +140,16 @@ export function InstanceCard({
           </div>
         </div>
 
+        {/* Warnings */}
+        {!hasApiKey && (
+          <div className="bg-yellow-900/20 border border-yellow-800 rounded-lg p-3">
+            <p className="text-xs text-yellow-400 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              Esta instancia no tiene API Key configurada
+            </p>
+          </div>
+        )}
+
         {/* Actions */}
         <div className="flex gap-2">
           {isConnected ? (
@@ -144,7 +170,7 @@ export function InstanceCard({
                 <Unplug className="h-4 w-4" />
               </Button>
             </>
-          ) : canConnect ? (
+          ) : canConnect && hasApiKey ? (
             <Button
               variant="gradient"
               className="w-full"
@@ -153,6 +179,15 @@ export function InstanceCard({
             >
               <QrCode className="mr-2 h-4 w-4" />
               {isConnecting ? "Generando QR..." : "Conectar con QR"}
+            </Button>
+          ) : !hasApiKey ? (
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled
+            >
+              <AlertCircle className="mr-2 h-4 w-4" />
+              Sin API Key
             </Button>
           ) : instance.status === InstanceStatus.CONNECTING ? (
             <Button
